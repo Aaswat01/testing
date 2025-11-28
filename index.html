@@ -225,22 +225,16 @@ align-items:center;color:#fff;font-size:0.9rem;}
   border: 1px solid rgba(192, 85, 85, 0.08);
   pointer-events: none;
 }
-/* Prevent tile reflow during rotation */
-.leaflet-tile-pane {
+/* Core Fix: Stable rotation base */
+.leaflet-map-pane, .leaflet-tile-pane {
   transform-origin: center center !important;
   will-change: transform;
 }
 
-/* Keep markers readable */
-.leaflet-marker-pane,
-.leaflet-popup-pane {
+/* UI always stays upright */
+.leaflet-marker-pane, .leaflet-popup-pane, .leaflet-control-container {
   transform-origin: center center !important;
   will-change: transform;
-}
-
-/* Keep UI controls always upright */
-.leaflet-control-container {
-  transform-origin: center center !important;
 }
 
 .gm-stop-box {
@@ -581,9 +575,7 @@ align-items:center;color:#fff;font-size:0.9rem;}
 
 <div class="main-section">
   <div class="map-container">
-    <div id="map-rotate-wrapper" style="width:100%; height:100%; position:relative;">
-      <div id="map" class="map"></div>
-    </div>
+    <div id="map" class="map"></div>
     <button id="map-toggle">Full Map</button>
     <button id="locate-btn" title="Recenter to my location">🎯</button>
     <button id="compass-btn" style="
@@ -684,65 +676,110 @@ mapSelectBtn.onclick = () => {
         mapSelectBtn.textContent = "Select";
     }
 };
+/* ==============================
+   GOOGLE-MAPS STYLE ROTATION CORE
+   ============================== */
+
 let mapRotation = 0;
-const wrapper = document.getElementById("map-rotate-wrapper");
-const controlPane = document.querySelector(".leaflet-control-container");
+let autoFollow = true;
+let autoRotate = true;
+let userGesture = false;
+const mapPane = map.getPane("mapPane");
+const tilePane = map.getPane("tilePane");
+const markerPane = map.getPane("markerPane");
+const popupPane = map.getPane("popupPane");
+const controlPane = map.getPane("controlPane");
 
-function rotateMap(angle) {
-    mapRotation = angle;
+function applyRotation() {
+    if (zooming) return;
 
-    // Rotate only the wrapper
-    wrapper.style.transform = `rotate(${angle}deg)`;
-    wrapper.style.transformOrigin = "center center";
+    const r = `rotate(${mapRotation}deg)`;
+    const inv = `rotate(${-mapRotation}deg)`;
 
-    // Keep controls upright
-    controlPane.style.transform = `rotate(${-angle}deg)`;
+    mapPane.style.transform = r;
+    tilePane.style.transform = r;
+
+    markerPane.style.transform = inv;
+    popupPane.style.transform = inv;
+    controlPane.style.transform = inv;
 }
-let touchStartAngle = null;
 
-map.on("touchstart", (e) => {
+/* ---------------------------
+   Two-finger gesture handling
+   --------------------------- */
+
+let startAngle = null;
+
+map.on("touchstart", e => {
     if (e.touches.length === 2) {
-        autoRotation = false;
-        autoCenter = false;
+        userGesture = true;
+        autoRotate = false;
+        autoFollow = false;
 
         const [a, b] = e.touches;
-        touchStartAngle = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
+        startAngle = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
     }
 });
 
-map.on("touchmove", (e) => {
-    if (e.touches.length !== 2 || touchStartAngle === null) return;
+map.on("touchmove", e => {
+    if (e.touches.length !== 2 || startAngle === null) return;
 
     const [a, b] = e.touches;
-    const current = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
-    const delta = (current - touchStartAngle) * (180 / Math.PI);
+    const angle = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
+    const diff = (angle - startAngle) * (180 / Math.PI);
 
-    rotateMap(mapRotation + delta);
-
-    touchStartAngle = current;
+    mapRotation += diff;
+    startAngle = angle;
+    applyRotation();
 });
 
 map.on("touchend", () => {
-    touchStartAngle = null;
+    startAngle = null;
 });
-document.getElementById("compass-btn").onclick = () => {
-    autoRotation = true;
-    rotateMap(0);
 
-    if (userMarker) {
-        autoCenter = true;
-        map.flyTo(userMarker.getLatLng(), Math.max(map.getZoom(), 18));
-    }
+/* ------------------------
+   Zoom stability handlers
+   ------------------------ */
+
+map.on("zoomstart", () => {
+    zooming = true;
+});
+
+map.on("zoomend", () => {
+    zooming = false;
+    applyRotation();
+});
+
+/* ------------------------
+   Auto center suppression
+   ------------------------ */
+
+map.on("dragstart", () => {
+    autoFollow = false;
+});
+
+/* ------------------------
+   Compass button behavior
+   ------------------------ */
+
+document.getElementById("compass-btn").onclick = () => {
+    mapRotation = 0;
+    autoRotate = true;
+    autoFollow = true;
+    applyRotation();
 };
-// Resume auto mode only if moving and user hasn't touched map recently
-setInterval(() => {
-    if (!autoRotation && userSpeed > 3 && !zooming && touchStartAngle === null) {
-        autoRotation = true;
-    }
-}, 2000);
+
+/* ------------------------
+   Auto follow button behavior
+   ------------------------ */
+
+document.getElementById("locate-btn").onclick = () => {
+    autoFollow = true;
+    map.flyTo(userMarker.getLatLng(), 18, { animate: true });
+};
+
 
 const colors = ['#FF6B6B','#4DA6FF','#FFD93D','#6BCB77','#FF8C00','#9B59B6','#00BFA5'];
-let autoRotation = true;
 let lastManualRotation = 0;
 let manualRotationTimeout = 4000; // auto resume after 4s if user isn't touching map
 let activeRouteIndex = null;
@@ -1562,26 +1599,19 @@ if (navigator.geolocation){
     }
     if(!waypoints.length) waypoints.push(latlng); else waypoints[0]=latlng;
     // Always update marker position
-    if (!userMarker) {
-        userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
-    } else {
+    if (userMarker) {
         userMarker.setLatLng(latlng);
     }
 
-    // Auto-center only if enabled
-    if (autoCenter) {
+    if (autoFollow) {
         map.panTo(latlng, { animate: true });
     }
 
-    // Only rotate map if rotation mode is enabled
-    // AUTO ROTATION BEHAVIOR
-    if (autoRotation) {
-        rotateMap(-heading);
-    } else {
-        // Keep car icon pointing correct direction even when map not rotating
-        const carSvg = document.getElementById('user-car-svg');
-        if (carSvg) carSvg.style.transform = `rotate(${heading}deg)`;
+    if (autoRotate && heading != null) {
+        mapRotation = -heading;
+        applyRotation();
     }
+
 
     // Auto resume rotation if user stopped interacting
     if (!autoRotation && Date.now() - lastManualRotation > manualRotationTimeout && currentSpeed > 3) {
@@ -1589,12 +1619,6 @@ if (navigator.geolocation){
     }
     const compassBtn = document.getElementById("compass-btn");
 
-    compassBtn.onclick = () => {
-        autoRotation = true;
-        rotateMap(0); // Reset to north
-        compassBtn.style.background = "#00b300";
-        setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
-    };
 
     await adaptiveAIDashboard(latlng, heading);
   }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
@@ -2091,41 +2115,7 @@ locateBtn.onclick = () => {
 };
 let zooming = false;
 
-map.on("zoomstart", () => {
-    zooming = true;
-
-    // freeze wrapper during zoom to avoid animation conflict
-    wrapper.style.transition = "none";
-});
-
-map.on("zoomend", () => {
-    zooming = false;
-
-    // restore rotation smoothly after zoom animation ends
-    wrapper.style.transition = "transform 0.25s ease-out";
-    rotateMap(mapRotation);
-});
-
-map.on("moveend", () => {
-    if (!zooming && autoRotation) {
-        rotateMap(mapRotation);
-    }
-});
-
 const locateBtn = document.getElementById("locate-btn");
-locateBtn.addEventListener("click", () => {
-    if (!userMarker) return;
-
-    autoCenter = true;
-
-    // Jump to car
-    const pos = userMarker.getLatLng();
-    map.flyTo(pos, Math.max(18, map.getZoom()), { animate: true });
-
-    // UI feedback
-    locateBtn.style.background = "#00b300"; // Green = following restored
-});
-
 
 // ===== Search =====
 const input = document.getElementById("searchInput");

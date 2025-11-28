@@ -687,26 +687,26 @@ let mapRotation = 0;
 function rotateMap(angle) {
     mapRotation = angle;
 
-    // Rotate ONLY tile and overlay layers
-    const tilePane = map.getPane("tilePane");
-    const overlayPane = map.getPane("overlayPane");
-    const markerPane = map.getPane("markerPane");
-    const controlPane = map.getPane("controlPane");
+    const mapPane = map.getPane('mapPane');
+    const markerPane = map.getPane('markerPane');
+    const popupPane = map.getPane('popupPane');
+    const controlPane = map.getPane('controlPane');
 
-    if (!tilePane) return;
+    if (!mapPane) return;
 
-    const rotateCSS = `rotate(${angle}deg) translateZ(0)`;
+    // Rotate everything as a single layer
+    mapPane.style.transform = `rotate(${angle}deg)`;
+    mapPane.style.transformOrigin = "center center";
 
-    tilePane.style.transform = rotateCSS;
-    overlayPane.style.transform = rotateCSS;
-    markerPane.style.transform = rotateCSS;
-
-    // Keep UI upright
+    // Keep markers, popups and controls upright
+    markerPane.style.transform = `rotate(${-angle}deg)`;
+    popupPane.style.transform = `rotate(${-angle}deg)`;
     controlPane.style.transform = `rotate(${-angle}deg)`;
 
-    // Force tile position update smooth
-    map.invalidateSize({ animate: false });
+    // Force tile alignment after transform
+    map.invalidateSize({ animate:false });
 }
+
 let gestureStartAngle = null;
 
 map.on("touchstart", (e) => {
@@ -2099,12 +2099,25 @@ locateBtn.onclick = () => {
     locateBtn.style.background = "#00cc66";
     setTimeout(() => locateBtn.style.background = "#1e90ff", 600);
 };
+let zooming = false;
+
 map.on("zoomstart", () => {
-    map.getPane("tilePane").style.transition = "none";
+    zooming = true;
+    // Disable rotation visually to prevent tearing
+    map.getPane("mapPane").style.transition = "none";
 });
 
 map.on("zoomend", () => {
+    zooming = false;
+
+    // Reapply rotation smoothly
+    map.getPane("mapPane").style.transition = "transform 0.25s ease-in-out";
     rotateMap(mapRotation);
+});
+map.on("moveend", () => {
+    if (!zooming && autoRotation) {
+        rotateMap(mapRotation);
+    }
 });
 
 const locateBtn = document.getElementById("locate-btn");

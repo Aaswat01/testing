@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -224,6 +225,24 @@ align-items:center;color:#fff;font-size:0.9rem;}
   border: 1px solid rgba(192, 85, 85, 0.08);
   pointer-events: none;
 }
+/* Prevent tile reflow during rotation */
+.leaflet-tile-pane {
+  transform-origin: center center !important;
+  will-change: transform;
+}
+
+/* Keep markers readable */
+.leaflet-marker-pane,
+.leaflet-popup-pane {
+  transform-origin: center center !important;
+  will-change: transform;
+}
+
+/* Keep UI controls always upright */
+.leaflet-control-container {
+  transform-origin: center center !important;
+}
+
 .gm-stop-box {
   background:rgba(255,255,255,0.08);
   border:1px solid rgba(255,255,255,0.15);
@@ -663,48 +682,74 @@ mapSelectBtn.onclick = () => {
         mapSelectBtn.textContent = "Select";
     }
 };
+let mapRotation = 0;
+
 function rotateMap(angle) {
-  currentMapRotation = angle;
+    mapRotation = angle;
 
-  const mapPane = map.getPane('mapPane');
-  const controlPane = map.getPane('controlPane');
-  const carSvg = document.getElementById('user-car-svg');
+    // Rotate ONLY tile and overlay layers
+    const tilePane = map.getPane("tilePane");
+    const overlayPane = map.getPane("overlayPane");
+    const markerPane = map.getPane("markerPane");
+    const controlPane = map.getPane("controlPane");
 
-  if (mapPane) {
-    mapPane.style.transform = `rotate(${angle}deg)`;
-    mapPane.style.transformOrigin = "center center";
-  }
+    if (!tilePane) return;
 
-  if (controlPane) controlPane.style.transform = `rotate(${-angle}deg)`;
+    const rotateCSS = `rotate(${angle}deg) translateZ(0)`;
 
-  // Car stays forward — not rotated by map
-  if (carSvg) carSvg.style.transform = "rotate(0deg)";
+    tilePane.style.transform = rotateCSS;
+    overlayPane.style.transform = rotateCSS;
+    markerPane.style.transform = rotateCSS;
+
+    // Keep UI upright
+    controlPane.style.transform = `rotate(${-angle}deg)`;
+
+    // Force tile position update smooth
+    map.invalidateSize({ animate: false });
 }
-let touchStartAngle = null;
-let lastAngle = 0;
+let gestureStartAngle = null;
 
-map._container.addEventListener("touchmove", (event) => {
-    if (event.touches.length < 2) return;
+map.on("touchstart", (e) => {
+    if (e.touches.length === 2) {
+        autoRotation = false;
+        autoCenter = false;
 
-    autoRotation = false; // Disable heading rotation while user rotates manually
-    autoCenter = false;
-
-    const [t1, t2] = event.touches;
-    const angle = Math.atan2(t2.pageY - t1.pageY, t2.pageX - t1.pageX) * (180 / Math.PI);
-
-    if (touchStartAngle === null) touchStartAngle = angle;
-
-    const delta = angle - touchStartAngle;
-    lastAngle = delta;
-
-    rotateMap(delta);
-
-    lastManualRotation = Date.now();
-}, { passive: true });
-
-map._container.addEventListener("touchend", () => {
-    touchStartAngle = null;
+        const [p1, p2] = e.touches;
+        gestureStartAngle = Math.atan2(
+            p2.clientY - p1.clientY,
+            p2.clientX - p1.clientX
+        ) * (180 / Math.PI);
+    }
 });
+
+map.on("touchmove", (e) => {
+    if (e.touches.length !== 2 || gestureStartAngle === null) return;
+
+    const [p1, p2] = e.touches;
+    const angle = Math.atan2(
+        p2.clientY - p1.clientY,
+        p2.clientX - p1.clientX
+    ) * (180 / Math.PI);
+
+    const delta = angle - gestureStartAngle;
+    rotateMap(mapRotation + delta);
+
+    gestureStartAngle = angle;
+});
+
+map.on("touchend", () => {
+    gestureStartAngle = null;
+});
+
+// ====== COMPASS RESET ======
+document.getElementById("compass-btn").onclick = () => {
+    autoRotation = true;
+    rotateMap(0);
+
+    setTimeout(() => {
+        if (userMarker) map.panTo(userMarker.getLatLng());
+    }, 300);
+};
 
 const colors = ['#FF6B6B','#4DA6FF','#FFD93D','#6BCB77','#FF8C00','#9B59B6','#00BFA5'];
 let autoRotation = true;
@@ -1539,12 +1584,13 @@ if (navigator.geolocation){
     }
 
     // Only rotate map if rotation mode is enabled
+    // AUTO ROTATION BEHAVIOR
     if (autoRotation) {
         rotateMap(-heading);
     } else {
-        // Car remains oriented relative to map
+        // Keep car icon pointing correct direction even when map not rotating
         const carSvg = document.getElementById('user-car-svg');
-        if (carSvg) carSvg.style.transform = `rotate(${heading + currentMapRotation}deg)`;
+        if (carSvg) carSvg.style.transform = `rotate(${heading}deg)`;
     }
 
     // Auto resume rotation if user stopped interacting
@@ -2039,9 +2085,26 @@ document.getElementById("map-toggle").addEventListener("click",()=>{
     button.innerText="Full Map"; mapFull=false; setTimeout(()=>map.invalidateSize(),300);
   }
 });
-map.on('dragstart zoomstart', () => {
+map.on("dragstart", () => {
     autoCenter = false;
-    locateBtn.style.background = "#1e90ff"; // Blue = not following
+});
+
+locateBtn.onclick = () => {
+    autoCenter = true;
+
+    if (userMarker) {
+        map.flyTo(userMarker.getLatLng(), Math.max(18, map.getZoom()));
+    }
+
+    locateBtn.style.background = "#00cc66";
+    setTimeout(() => locateBtn.style.background = "#1e90ff", 600);
+};
+map.on("zoomstart", () => {
+    map.getPane("tilePane").style.transition = "none";
+});
+
+map.on("zoomend", () => {
+    rotateMap(mapRotation);
 });
 
 const locateBtn = document.getElementById("locate-btn");

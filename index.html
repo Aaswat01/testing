@@ -565,6 +565,23 @@ align-items:center;color:#fff;font-size:0.9rem;}
     <div id="map" class="map"></div>
     <button id="map-toggle">Full Map</button>
     <button id="locate-btn" title="Recenter to my location">🎯</button>
+    <button id="compass-btn" style="
+    position:absolute;
+    top:8vh;
+    right:1vh;
+    z-index:2000;
+    background:#1e90ff;
+    color:white;
+    border:none;
+    border-radius:50%;
+    width:42px;
+    height:42px;
+    font-size:1.2rem;
+    font-weight:bold;
+    cursor:pointer;
+    box-shadow:0 0.4vh 1vh rgba(0,0,0,0.4);
+    ">🧭</button>
+
     <div id="routePanel"></div>
     <div id="approvalPanel" aria-live="polite">
       <div class="approval-row">
@@ -594,17 +611,8 @@ align-items:center;color:#fff;font-size:0.9rem;}
 // Priority: Driver's actual location > Pre-planned announcements
 // ==============================
 
-let currentMapRotation = 0;
-function rotateMap(angle) {
-  currentMapRotation = angle;
-  const mapPane = map.getPane('mapPane');
-  if (mapPane) {
-    mapPane.style.transform = `rotate(${angle}deg)`;
-    mapPane.style.transformOrigin = "center center";
-  }
-  const controlPane = map.getPane('controlPane');
-  if (controlPane) controlPane.style.transform = `rotate(${-angle}deg)`;
-}
+
+
 
 const map = L.map('map').setView([0, 0], 2);
 let autoCenter = true;
@@ -655,9 +663,53 @@ mapSelectBtn.onclick = () => {
         mapSelectBtn.textContent = "Select";
     }
 };
+function rotateMap(angle) {
+  currentMapRotation = angle;
+
+  const mapPane = map.getPane('mapPane');
+  const controlPane = map.getPane('controlPane');
+  const carSvg = document.getElementById('user-car-svg');
+
+  if (mapPane) {
+    mapPane.style.transform = `rotate(${angle}deg)`;
+    mapPane.style.transformOrigin = "center center";
+  }
+
+  if (controlPane) controlPane.style.transform = `rotate(${-angle}deg)`;
+
+  // Car stays forward — not rotated by map
+  if (carSvg) carSvg.style.transform = "rotate(0deg)";
+}
+let touchStartAngle = null;
+let lastAngle = 0;
+
+map._container.addEventListener("touchmove", (event) => {
+    if (event.touches.length < 2) return;
+
+    autoRotation = false; // Disable heading rotation while user rotates manually
+    autoCenter = false;
+
+    const [t1, t2] = event.touches;
+    const angle = Math.atan2(t2.pageY - t1.pageY, t2.pageX - t1.pageX) * (180 / Math.PI);
+
+    if (touchStartAngle === null) touchStartAngle = angle;
+
+    const delta = angle - touchStartAngle;
+    lastAngle = delta;
+
+    rotateMap(delta);
+
+    lastManualRotation = Date.now();
+}, { passive: true });
+
+map._container.addEventListener("touchend", () => {
+    touchStartAngle = null;
+});
 
 const colors = ['#FF6B6B','#4DA6FF','#FFD93D','#6BCB77','#FF8C00','#9B59B6','#00BFA5'];
-
+let autoRotation = true;
+let lastManualRotation = 0;
+let manualRotationTimeout = 4000; // auto resume after 4s if user isn't touching map
 let activeRouteIndex = null;
 let currentStepIndex = 0;
 let ECO_START_BLOCK = Date.now() + 3000;
@@ -1489,10 +1541,24 @@ if (navigator.geolocation){
     // Only rotate map if rotation mode is enabled
     if (autoRotation) {
         rotateMap(-heading);
+    } else {
+        // Car remains oriented relative to map
+        const carSvg = document.getElementById('user-car-svg');
+        if (carSvg) carSvg.style.transform = `rotate(${heading + currentMapRotation}deg)`;
     }
 
-    const carEl = document.getElementById('user-car-svg');
-    if (carEl) carEl.style.transform = `rotate(${heading}deg)`;
+    // Auto resume rotation if user stopped interacting
+    if (!autoRotation && Date.now() - lastManualRotation > manualRotationTimeout && currentSpeed > 3) {
+        autoRotation = true;
+    }
+    const compassBtn = document.getElementById("compass-btn");
+
+    compassBtn.onclick = () => {
+        autoRotation = true;
+        rotateMap(0); // Reset to north
+        compassBtn.style.background = "#00b300";
+        setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
+    };
 
     await adaptiveAIDashboard(latlng, heading);
   }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });

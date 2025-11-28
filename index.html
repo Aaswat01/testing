@@ -665,86 +665,130 @@ mapSelectBtn.onclick = () => {
 };
 
 // =========================
-// GOOGLE-MAPS STYLE ROTATION ENGINE
+// 🟢 UPDATED: ROBUST ROTATION & TOUCH ENGINE
 // =========================
 
 let autoRotation = true;
 let autoCenter = true;
 let lastManualRotationTime = 0;
-const ROTATION_IDLE_RESUME = 6000; // resume auto after 6s if moving
+const ROTATION_IDLE_RESUME = 6000; 
 
-// Rotate the map + keep car upright
+// 1. Apply Heading (Auto-Drive Mode)
 function applyHeadingRotation(heading) {
-
     if (!userMarker) return;
 
-    if (autoRotation) {
-        map.setBearing(-heading);        // map rotates
+    if (autoRotation && autoCenter) {
+        // Rotate map to face heading (North is Up relative to car)
+        // We use setBearing from the plugin, ensuring we pivot around the center
+        map.setBearing(360 - heading); 
         document.getElementById("user-car-svg").style.transform = "rotate(0deg)";
     } else {
+        // Map is static/North-up, rotate the car icon instead
         document.getElementById("user-car-svg").style.transform = `rotate(${heading}deg)`;
     }
 }
 
-// =========================
-// USER TOUCH ROTATION CONTROL
-// =========================
+// 2. Smart Touch Logic (Distinguishes Zoom vs Rotate)
+let startAngle = 0;
+let startDist = 0;
+let isRotating = false;
 
-let startAngle = null;
+map._container.addEventListener("touchstart", e => {
+    if (e.touches.length === 2) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        
+        // Calculate initial angle
+        startAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * 180 / Math.PI;
+        // Calculate initial distance (for zoom detection)
+        startDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        
+        isRotating = false;
+    }
+}, { passive: true });
 
 map._container.addEventListener("touchmove", e => {
-    if (e.touches.length < 2) return;
+    if (e.touches.length === 2) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
 
-    autoRotation = false; 
-    autoCenter = false;
+        // Current metrics
+        const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * 180 / Math.PI;
+        const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
 
-    const [t1, t2] = e.touches;
-    const angle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * 180 / Math.PI;
+        // Calculate deltas
+        const angleDelta = currentAngle - startAngle;
+        const distDelta = Math.abs(currentDist - startDist);
 
-    if (startAngle === null) startAngle = angle;
+        // 🟢 LOGIC: Only rotate if angle changes significantly (>5deg) 
+        // AND distance hasn't changed much (to prevent rotation during zoom)
+        if (!isRotating && distDelta > 40) {
+            // User is Zooming (pinching), ignore rotation
+            return;
+        }
 
-    const delta = angle - startAngle;
-
-    map.setBearing(delta);
-
-    lastManualRotationTime = Date.now();
+        // If we passed the threshold, start rotating
+        if (Math.abs(angleDelta) > 5 || isRotating) {
+            isRotating = true;
+            autoRotation = false; 
+            autoCenter = false; 
+            
+            // Apply rotation relative to current bearing
+            const newBearing = (map.getBearing() + angleDelta) % 360;
+            map.setBearing(newBearing);
+            
+            // Update start angle for smooth continuous rotation
+            startAngle = currentAngle;
+            lastManualRotationTime = Date.now();
+            
+            // Visual feedback on buttons
+            locateBtn.style.background = "#1e90ff"; // Blue (inactive)
+            compassBtn.style.background = "#1e90ff"; // Blue (inactive)
+        }
+    }
 }, { passive: true });
 
 map._container.addEventListener("touchend", () => {
-    startAngle = null;
+    isRotating = false;
 });
 
-// =========================
-// COMPASS BUTTON
-// =========================
-
+// 3. Fixed Compass Button
 const compassBtn = document.getElementById("compass-btn");
 
 compassBtn.addEventListener("click", () => {
-    autoRotation = true;
-    map.setBearing(0); // north up
-    compassBtn.style.background = "#00b36b";
-    setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
+    // Reset state
+    autoRotation = false; // Compass mode usually means North-Up fixed
+    autoCenter = true;    // Re-center on user
+    
+    // Reset Map to North Up (Bearing 0)
+    map.setBearing(0);
+    
+    // Animate UI
+    compassBtn.style.background = "#00b36b"; // Green
+    setTimeout(() => compassBtn.style.background = "#1e90ff", 1000);
+    
+    // Re-align car immediately
+    if (userMarker) {
+        map.flyTo(userMarker.getLatLng(), map.getZoom(), { animate: true, duration: 0.5 });
+    }
 });
 
-// =========================
-// RECENTER BUTTON
-// =========================
-
+// 4. Fixed Re-Center Button
 const locateBtn = document.getElementById("locate-btn");
 
 locateBtn.addEventListener("click", () => {
     autoCenter = true;
-    autoRotation = true;
-    if (userMarker) map.flyTo(userMarker.getLatLng(), Math.max(18, map.getZoom()));
-
-    locateBtn.style.background = "#00b36b";
+    autoRotation = true; // Resume Heads-up navigation
+    
+    if (userMarker) {
+        // Use flyTo for smooth animation including rotation reset if needed
+        map.flyTo(userMarker.getLatLng(), 18, { animate: true, duration: 1 });
+    }
+    
+    locateBtn.style.background = "#00b36b"; // Green
 });
 
-// =========================
-// WHEN USER DRAGS MAP
-// =========================
-
+// 5. Drag Interaction
 map.on("dragstart", () => {
     autoCenter = false;
     locateBtn.style.background = "#1e90ff";
@@ -1563,37 +1607,59 @@ async function adaptiveAIDashboard(latlng, heading) {
 }
 
 // ===== GPS watch =====
+// ===== UPDATED GPS WATCH =====
 if (navigator.geolocation){
-  navigator.geolocation.watchPosition(async pos=>{
+  navigator.geolocation.watchPosition(async pos => {
     const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    
+    // 1. Update Data
     updateSpeedLimit(latlng);
     const currentSpeed = calculateGPSSpeed(latlng);
+    
+    // 2. Calculate Heading
     let heading = pos.coords.heading;
-    const MIN_SPEED_FOR_HEADING = 5/3.6;
+    const MIN_SPEED_FOR_HEADING = 5/3.6; // Only update heading if moving > 5km/h
+    
     if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
-      const carEl = document.getElementById('user-car-svg');
-      if (carEl) {
-        const m = (carEl.style.transform || "").match(/rotate\(([^)]+)deg\)/);
-        heading = m ? parseFloat(m[1]) : 0;
-      } else heading = 0;
+      // Keep previous heading if stopped to prevent spinning
+      heading = window.lastKnownHeading || 0;
+    } else {
+      window.lastKnownHeading = heading;
     }
+
     if(!waypoints.length) waypoints.push(latlng); else waypoints[0]=latlng;
-    // Always update marker position
+
+    // 3. Update Marker
     if (!userMarker) {
         userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
     } else {
         userMarker.setLatLng(latlng);
+        userMarker.setOpacity(1);
     }
 
-    // Auto-center only if enabled
+    // 4. Smooth Auto-Centering & Rotation
     if (autoCenter) {
-        map.panTo(latlng, { animate: true });
+        // If we are in "Heads Up" mode (Auto Rotation)
+        if (autoRotation) {
+            // Apply bearing (map rotates)
+            map.setBearing(360 - heading);
+            // Ensure car icon is fixed upright
+            document.getElementById("user-car-svg").style.transform = "rotate(0deg)";
+        } else {
+            // North-up mode: Rotate car icon only
+            document.getElementById("user-car-svg").style.transform = `rotate(${heading}deg)`;
+        }
+        
+        // Use panTo for position (smoother than flyTo for small updates)
+        map.panTo(latlng, { animate: true, duration: 1.0 });
     }
 
     await adaptiveAIDashboard(latlng, heading);
-  }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
+  }, 
+  (err) => console.warn("GPS unavailable", err), 
+  { enableHighAccuracy:true, maximumAge:1000, timeout:5000 }
+  );
 }
-
 let driverCountry = null;
 async function updateDriverCountry(latlng) {
   try {

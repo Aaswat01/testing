@@ -581,7 +581,9 @@ align-items:center;color:#fff;font-size:0.9rem;}
 
 <div class="main-section">
   <div class="map-container">
-    <div id="map" class="map"></div>
+    <div id="map-rotate-wrapper" style="width:100%; height:100%; position:relative;">
+      <div id="map" class="map"></div>
+    </div>
     <button id="map-toggle">Full Map</button>
     <button id="locate-btn" title="Recenter to my location">🎯</button>
     <button id="compass-btn" style="
@@ -683,73 +685,61 @@ mapSelectBtn.onclick = () => {
     }
 };
 let mapRotation = 0;
+const wrapper = document.getElementById("map-rotate-wrapper");
+const controlPane = document.querySelector(".leaflet-control-container");
 
 function rotateMap(angle) {
     mapRotation = angle;
 
-    const mapPane = map.getPane('mapPane');
-    const markerPane = map.getPane('markerPane');
-    const popupPane = map.getPane('popupPane');
-    const controlPane = map.getPane('controlPane');
+    // Rotate only the wrapper
+    wrapper.style.transform = `rotate(${angle}deg)`;
+    wrapper.style.transformOrigin = "center center";
 
-    if (!mapPane) return;
-
-    // Rotate everything as a single layer
-    mapPane.style.transform = `rotate(${angle}deg)`;
-    mapPane.style.transformOrigin = "center center";
-
-    // Keep markers, popups and controls upright
-    markerPane.style.transform = `rotate(${-angle}deg)`;
-    popupPane.style.transform = `rotate(${-angle}deg)`;
+    // Keep controls upright
     controlPane.style.transform = `rotate(${-angle}deg)`;
-
-    // Force tile alignment after transform
-    map.invalidateSize({ animate:false });
 }
-
-let gestureStartAngle = null;
+let touchStartAngle = null;
 
 map.on("touchstart", (e) => {
     if (e.touches.length === 2) {
         autoRotation = false;
         autoCenter = false;
 
-        const [p1, p2] = e.touches;
-        gestureStartAngle = Math.atan2(
-            p2.clientY - p1.clientY,
-            p2.clientX - p1.clientX
-        ) * (180 / Math.PI);
+        const [a, b] = e.touches;
+        touchStartAngle = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
     }
 });
 
 map.on("touchmove", (e) => {
-    if (e.touches.length !== 2 || gestureStartAngle === null) return;
+    if (e.touches.length !== 2 || touchStartAngle === null) return;
 
-    const [p1, p2] = e.touches;
-    const angle = Math.atan2(
-        p2.clientY - p1.clientY,
-        p2.clientX - p1.clientX
-    ) * (180 / Math.PI);
+    const [a, b] = e.touches;
+    const current = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
+    const delta = (current - touchStartAngle) * (180 / Math.PI);
 
-    const delta = angle - gestureStartAngle;
     rotateMap(mapRotation + delta);
 
-    gestureStartAngle = angle;
+    touchStartAngle = current;
 });
 
 map.on("touchend", () => {
-    gestureStartAngle = null;
+    touchStartAngle = null;
 });
-
-// ====== COMPASS RESET ======
 document.getElementById("compass-btn").onclick = () => {
     autoRotation = true;
     rotateMap(0);
 
-    setTimeout(() => {
-        if (userMarker) map.panTo(userMarker.getLatLng());
-    }, 300);
+    if (userMarker) {
+        autoCenter = true;
+        map.flyTo(userMarker.getLatLng(), Math.max(map.getZoom(), 18));
+    }
 };
+// Resume auto mode only if moving and user hasn't touched map recently
+setInterval(() => {
+    if (!autoRotation && userSpeed > 3 && !zooming && touchStartAngle === null) {
+        autoRotation = true;
+    }
+}, 2000);
 
 const colors = ['#FF6B6B','#4DA6FF','#FFD93D','#6BCB77','#FF8C00','#9B59B6','#00BFA5'];
 let autoRotation = true;
@@ -2103,17 +2093,19 @@ let zooming = false;
 
 map.on("zoomstart", () => {
     zooming = true;
-    // Disable rotation visually to prevent tearing
-    map.getPane("mapPane").style.transition = "none";
+
+    // freeze wrapper during zoom to avoid animation conflict
+    wrapper.style.transition = "none";
 });
 
 map.on("zoomend", () => {
     zooming = false;
 
-    // Reapply rotation smoothly
-    map.getPane("mapPane").style.transition = "transform 0.25s ease-in-out";
+    // restore rotation smoothly after zoom animation ends
+    wrapper.style.transition = "transform 0.25s ease-out";
     rotateMap(mapRotation);
 });
+
 map.on("moveend", () => {
     if (!zooming && autoRotation) {
         rotateMap(mapRotation);

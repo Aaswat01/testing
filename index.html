@@ -604,6 +604,8 @@ align-items:center;color:#fff;font-size:0.9rem;}
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+<script src="https://rawcdn.githack.com/bbecquet/Leaflet.RotatedMarker/master/leaflet.rotatedMarker.js"></script>
+<script src="https://rawcdn.githack.com/captainpainway/Leaflet.Map.Rotate/master/dist/leaflet-map-rotate.min.js"></script>
 <script>
 
 // ==============================
@@ -614,7 +616,8 @@ align-items:center;color:#fff;font-size:0.9rem;}
 
 
 
-const map = L.map('map').setView([0, 0], 2);
+const map = L.map('map', { rotate: true, bearing: 0 }).setView([0,0], 16);
+
 let autoCenter = true;
 
 const englishMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -665,28 +668,7 @@ mapSelectBtn.onclick = () => {
 };
 function rotateMap(angle) {
     currentMapRotation = angle;
-
-    const mapPane = map.getPane("mapPane");
-    const overlayPane = map.getPane("overlayPane");
-    const controlPane = map.getPane("controlPane");
-    const markerPane = map.getPane("markerPane");
-    const carSvg = document.getElementById("user-car-svg");
-
-    // GPU smooth rotating
-    const transform = `rotate(${angle}deg) translateZ(0)`;
-
-    mapPane.style.transform = transform;
-    overlayPane.style.transform = transform;
-    markerPane.style.transform = transform;
-
-    // Controls rotate back so they stay normal
-    controlPane.style.transform = `rotate(${-angle}deg)`;
-
-    // Car icon ALWAYS facing top of screen
-    if (carSvg) carSvg.style.transform = "rotate(0deg)";
-
-    // Force leaflet to update tile position smoothly
-    map.once("moveend", () => map.invalidateSize(false));
+    map.setBearing(angle);
 }
 
 let touchStartAngle = null;
@@ -715,7 +697,10 @@ map._container.addEventListener("touchend", () => {
 // ====== COMPASS RESET ======
 document.getElementById("compass-btn").onclick = () => {
     autoRotation = true;
-    rotateMap(0);
+    map.setBearing(0);
+
+    compassBtn.style.background = "#00b300";
+    setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
 };
 
 const colors = ['#FF6B6B','#4DA6FF','#FFD93D','#6BCB77','#FF8C00','#9B59B6','#00BFA5'];
@@ -1552,11 +1537,10 @@ if (navigator.geolocation){
 
     // Only rotate map if rotation mode is enabled
     if (autoRotation) {
-        rotateMap(-heading);
+        map.setBearing(-heading);
+        if (carMarker) carMarker.setRotationAngle(0);
     } else {
-        // Car remains oriented relative to map
-        const carSvg = document.getElementById('user-car-svg');
-        if (carSvg) carSvg.style.transform = `rotate(${heading + currentMapRotation}deg)`;
+        if (carMarker) carMarker.setRotationAngle(heading);
     }
 
     // Auto resume rotation if user stopped interacting

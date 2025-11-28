@@ -604,8 +604,6 @@ align-items:center;color:#fff;font-size:0.9rem;}
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-<script src="https://rawcdn.githack.com/bbecquet/Leaflet.RotatedMarker/master/leaflet.rotatedMarker.js"></script>
-<script src="https://rawcdn.githack.com/captainpainway/Leaflet.Map.Rotate/master/dist/leaflet-map-rotate.min.js"></script>
 <script>
 
 // ==============================
@@ -616,7 +614,9 @@ align-items:center;color:#fff;font-size:0.9rem;}
 
 
 
-const map = L.map('map', { rotate: true, bearing: 0 }).setView([0,0], 16);
+const map = L.map('map').setView([0, 0], 2);
+let autoCenter = true;
+
 const englishMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap contributors | © CartoDB',
   subdomains: 'abcd', maxZoom: 19
@@ -663,148 +663,64 @@ mapSelectBtn.onclick = () => {
         mapSelectBtn.textContent = "Select";
     }
 };
+function rotateMap(angle) {
+    currentMapRotation = angle;
 
-// =========================
-// 🟢 UPDATED: ROBUST ROTATION & TOUCH ENGINE
-// =========================
+    const mapPane = map.getPane("mapPane");
+    const overlayPane = map.getPane("overlayPane");
+    const controlPane = map.getPane("controlPane");
+    const markerPane = map.getPane("markerPane");
+    const carSvg = document.getElementById("user-car-svg");
 
-let autoRotation = true;
-let autoCenter = true;
-let lastManualRotationTime = 0;
-const ROTATION_IDLE_RESUME = 6000; 
+    // GPU smooth rotating
+    const transform = `rotate(${angle}deg) translateZ(0)`;
 
-// 1. Apply Heading (Auto-Drive Mode)
-function applyHeadingRotation(heading) {
-    if (!userMarker) return;
+    mapPane.style.transform = transform;
+    overlayPane.style.transform = transform;
+    markerPane.style.transform = transform;
 
-    if (autoRotation && autoCenter) {
-        // Rotate map to face heading (North is Up relative to car)
-        // We use setBearing from the plugin, ensuring we pivot around the center
-        map.setBearing(360 - heading); 
-        document.getElementById("user-car-svg").style.transform = "rotate(0deg)";
-    } else {
-        // Map is static/North-up, rotate the car icon instead
-        document.getElementById("user-car-svg").style.transform = `rotate(${heading}deg)`;
-    }
+    // Controls rotate back so they stay normal
+    controlPane.style.transform = `rotate(${-angle}deg)`;
+
+    // Car icon ALWAYS facing top of screen
+    if (carSvg) carSvg.style.transform = "rotate(0deg)";
+
+    // Force leaflet to update tile position smoothly
+    map.once("moveend", () => map.invalidateSize(false));
 }
 
-// 2. Smart Touch Logic (Distinguishes Zoom vs Rotate)
-let startAngle = 0;
-let startDist = 0;
-let isRotating = false;
+let touchStartAngle = null;
 
-map._container.addEventListener("touchstart", e => {
-    if (e.touches.length === 2) {
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-        
-        // Calculate initial angle
-        startAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * 180 / Math.PI;
-        // Calculate initial distance (for zoom detection)
-        startDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-        
-        isRotating = false;
-    }
-}, { passive: true });
+map._container.addEventListener("touchmove", evt => {
+    if (evt.touches.length < 2) return;
 
-map._container.addEventListener("touchmove", e => {
-    if (e.touches.length === 2) {
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-
-        // Current metrics
-        const currentAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * 180 / Math.PI;
-        const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-
-        // Calculate deltas
-        const angleDelta = currentAngle - startAngle;
-        const distDelta = Math.abs(currentDist - startDist);
-
-        // 🟢 LOGIC: Only rotate if angle changes significantly (>5deg) 
-        // AND distance hasn't changed much (to prevent rotation during zoom)
-        if (!isRotating && distDelta > 40) {
-            // User is Zooming (pinching), ignore rotation
-            return;
-        }
-
-        // If we passed the threshold, start rotating
-        if (Math.abs(angleDelta) > 5 || isRotating) {
-            isRotating = true;
-            autoRotation = false; 
-            autoCenter = false; 
-            
-            // Apply rotation relative to current bearing
-            const newBearing = (map.getBearing() + angleDelta) % 360;
-            map.setBearing(newBearing);
-            
-            // Update start angle for smooth continuous rotation
-            startAngle = currentAngle;
-            lastManualRotationTime = Date.now();
-            
-            // Visual feedback on buttons
-            locateBtn.style.background = "#1e90ff"; // Blue (inactive)
-            compassBtn.style.background = "#1e90ff"; // Blue (inactive)
-        }
-    }
-}, { passive: true });
-
-map._container.addEventListener("touchend", () => {
-    isRotating = false;
-});
-
-// 3. Fixed Compass Button
-const compassBtn = document.getElementById("compass-btn");
-
-compassBtn.addEventListener("click", () => {
-    // Reset state
-    autoRotation = false; // Compass mode usually means North-Up fixed
-    autoCenter = true;    // Re-center on user
-    
-    // Reset Map to North Up (Bearing 0)
-    map.setBearing(0);
-    
-    // Animate UI
-    compassBtn.style.background = "#00b36b"; // Green
-    setTimeout(() => compassBtn.style.background = "#1e90ff", 1000);
-    
-    // Re-align car immediately
-    if (userMarker) {
-        map.flyTo(userMarker.getLatLng(), map.getZoom(), { animate: true, duration: 0.5 });
-    }
-});
-
-// 4. Fixed Re-Center Button
-const locateBtn = document.getElementById("locate-btn");
-
-locateBtn.addEventListener("click", () => {
-    autoCenter = true;
-    autoRotation = true; // Resume Heads-up navigation
-    
-    if (userMarker) {
-        // Use flyTo for smooth animation including rotation reset if needed
-        map.flyTo(userMarker.getLatLng(), 18, { animate: true, duration: 1 });
-    }
-    
-    locateBtn.style.background = "#00b36b"; // Green
-});
-
-// 5. Drag Interaction
-map.on("dragstart", () => {
+    autoRotation = false;
     autoCenter = false;
-    locateBtn.style.background = "#1e90ff";
+
+    const [t1, t2] = evt.touches;
+    const angle = Math.atan2(t2.pageY - t1.pageY, t2.pageX - t1.pageX) * (180/Math.PI);
+
+    if (touchStartAngle === null) touchStartAngle = angle;
+
+    const delta = angle - touchStartAngle;
+    rotateMap(delta);
+
+    lastManualRotation = Date.now();
+}, { passive: true });
+map._container.addEventListener("touchend", () => {
+    touchStartAngle = null;
+    setTimeout(() => map.invalidateSize(), 200);
 });
 
-// =========================
-// RESUME AUTO-ROTATION WHEN MOVING
-// =========================
-
-function maybeResumeRotation(speed) {
-    if (!autoRotation && speed > 4 && Date.now() - lastManualRotationTime > ROTATION_IDLE_RESUME) {
-        autoRotation = true;
-    }
-}
+// ====== COMPASS RESET ======
+document.getElementById("compass-btn").onclick = () => {
+    autoRotation = true;
+    rotateMap(0);
+};
 
 const colors = ['#FF6B6B','#4DA6FF','#FFD93D','#6BCB77','#FF8C00','#9B59B6','#00BFA5'];
+let autoRotation = true;
+let lastManualRotation = 0;
 let manualRotationTimeout = 4000; // auto resume after 4s if user isn't touching map
 let activeRouteIndex = null;
 let currentStepIndex = 0;
@@ -1607,59 +1523,59 @@ async function adaptiveAIDashboard(latlng, heading) {
 }
 
 // ===== GPS watch =====
-// ===== UPDATED GPS WATCH =====
 if (navigator.geolocation){
-  navigator.geolocation.watchPosition(async pos => {
+  navigator.geolocation.watchPosition(async pos=>{
     const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
-    
-    // 1. Update Data
     updateSpeedLimit(latlng);
     const currentSpeed = calculateGPSSpeed(latlng);
-    
-    // 2. Calculate Heading
     let heading = pos.coords.heading;
-    const MIN_SPEED_FOR_HEADING = 5/3.6; // Only update heading if moving > 5km/h
-    
+    const MIN_SPEED_FOR_HEADING = 5/3.6;
     if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
-      // Keep previous heading if stopped to prevent spinning
-      heading = window.lastKnownHeading || 0;
-    } else {
-      window.lastKnownHeading = heading;
+      const carEl = document.getElementById('user-car-svg');
+      if (carEl) {
+        const m = (carEl.style.transform || "").match(/rotate\(([^)]+)deg\)/);
+        heading = m ? parseFloat(m[1]) : 0;
+      } else heading = 0;
     }
-
     if(!waypoints.length) waypoints.push(latlng); else waypoints[0]=latlng;
-
-    // 3. Update Marker
+    // Always update marker position
     if (!userMarker) {
         userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
     } else {
         userMarker.setLatLng(latlng);
-        userMarker.setOpacity(1);
     }
 
-    // 4. Smooth Auto-Centering & Rotation
+    // Auto-center only if enabled
     if (autoCenter) {
-        // If we are in "Heads Up" mode (Auto Rotation)
-        if (autoRotation) {
-            // Apply bearing (map rotates)
-            map.setBearing(360 - heading);
-            // Ensure car icon is fixed upright
-            document.getElementById("user-car-svg").style.transform = "rotate(0deg)";
-        } else {
-            // North-up mode: Rotate car icon only
-            document.getElementById("user-car-svg").style.transform = `rotate(${heading}deg)`;
-        }
-        
-        // Use panTo for position (smoother than flyTo for small updates)
-        map.panTo(latlng, { animate: true, duration: 1.0 });
+        map.panTo(latlng, { animate: true });
     }
+
+    // Only rotate map if rotation mode is enabled
+    if (autoRotation) {
+        rotateMap(-heading);
+    } else {
+        // Car remains oriented relative to map
+        const carSvg = document.getElementById('user-car-svg');
+        if (carSvg) carSvg.style.transform = `rotate(${heading + currentMapRotation}deg)`;
+    }
+
+    // Auto resume rotation if user stopped interacting
+    if (!autoRotation && Date.now() - lastManualRotation > manualRotationTimeout && currentSpeed > 3) {
+        autoRotation = true;
+    }
+    const compassBtn = document.getElementById("compass-btn");
+
+    compassBtn.onclick = () => {
+        autoRotation = true;
+        rotateMap(0); // Reset to north
+        compassBtn.style.background = "#00b300";
+        setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
+    };
 
     await adaptiveAIDashboard(latlng, heading);
-  }, 
-  (err) => console.warn("GPS unavailable", err), 
-  { enableHighAccuracy:true, maximumAge:1000, timeout:5000 }
-  );
+  }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
+
 let driverCountry = null;
 async function updateDriverCountry(latlng) {
   try {
@@ -2139,6 +2055,8 @@ map.on('dragstart zoomstart', () => {
     autoCenter = false;
     locateBtn.style.background = "#1e90ff"; // Blue = not following
 });
+
+const locateBtn = document.getElementById("locate-btn");
 locateBtn.addEventListener("click", () => {
     if (!userMarker) return;
 

@@ -1,10 +1,9 @@
-1
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TJL - Location-Based Navigation</title>
+<title>aaswat</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -980,8 +979,8 @@ if (navigator.geolocation) {
     }
 
     // --- ALWAYS CENTER CAR WHEN autoCenter = true ---
-    if (autoCenter) {
-      map.setView(latlng, map.getZoom(), { animate: true });
+    if (follow) {
+        map.panTo(latlng, { animate:true });
     }
 
     // Rotation handled by plugin
@@ -997,15 +996,15 @@ if (navigator.geolocation) {
     timeout: 5000
   });
 }
-let followMode = true;
+let follow = true;
 let lastHeading = 0;
-
 function updateRotation(heading, speed) {
-    if (followMode && heading !== null && speed > 1) {
-        map.setBearing(heading, { animate: true, duration: 300 });
+    if (!follow) return;
+
+    if (heading !== null && speed > 1) {
+        map.setBearing(heading, { animate:true, duration:300 });
     }
 }
-
 
 // === Speed Limit (Overpass API - Real Data Only) ===
 // === Speed Limit (Overpass API - Real Data Only) ===
@@ -1979,22 +1978,23 @@ document.getElementById("map-toggle").addEventListener("click",()=>{
     button.innerText="Full Map"; mapFull=false; setTimeout(()=>map.invalidateSize(),300);
   }
 });
-map.on("dragstart", () => {
-  autoCenter = false;
+map.on("dragstart touchstart", () => {
+    follow = false;
 });
+
 document.getElementById("locate-btn").onclick = () => {
-    followMode = true;
-    if (userMarker) map.panTo(userMarker.getLatLng(), { animate:true });
+    follow = true;
+    if (userMarker) {
+        map.panTo(userMarker.getLatLng(), { animate:true });
+    }
 };
 
 document.getElementById("compass-btn").onclick = () => {
+    follow = false;  // user rotates manually
     map.setBearing(0, { animate:true, duration:300 });
-    followMode = true;
 };
-
 map.on("zoomstart", () => {
-    autoCenter = false;
-    userInteracting = true;
+    follow = false;
 });
 
 // ===== Search =====

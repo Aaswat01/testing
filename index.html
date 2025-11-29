@@ -2,93 +2,115 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Leaflet Rotate Demo</title>
+    <title>Leaflet Rotate Navigation</title>
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js"></script>
 
-    <!-- Leaflet Rotate Plugin -->
+    <!-- Leaflet Rotate -->
     <script src="https://unpkg.com/leaflet-rotate/dist/leaflet-rotate.js"></script>
 
     <style>
-        body { margin:0; overflow:hidden; }
-        #map { width:100vw; height:100vh; }
+        body { margin: 0; overflow: hidden; }
+        #map { width: 100vw; height: 100vh; }
 
-        #compass {
-            position:absolute;
-            top:15px;
-            right:15px;
-            background:white;
-            padding:10px;
-            border-radius:50%;
-            cursor:pointer;
-            box-shadow:0 3px 10px rgba(0,0,0,0.3);
-            z-index:9999;
+        #compass-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: white;
+            border-radius: 50%;
+            padding: 12px;
+            cursor: pointer;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+            z-index: 9999;
+        }
+        #follow-btn {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+            background: #0078FF;
+            color: white;
+            border-radius: 12px;
+            padding: 10px 14px;
+            cursor: pointer;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+            z-index: 9999;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
 
 <div id="map"></div>
-<div id="compass">🧭</div>
+<div id="compass-btn">🧭</div>
+<div id="follow-btn">FOLLOW: ON</div>
 
 <script>
-/* ---------------- MAP INITIALIZATION ---------------- */
+/* ---------------- MAP CORE ---------------- */
 const map = L.map("map", {
-    center: [0,0],
-    zoom: 18,
-    rotate: true     // enables rotation plugin
+    center: [20.5937, 78.9629], // India default
+    zoom: 17,
+    rotate: true,
+    touchRotate: true,
+    compassBearing: true
 });
 
-// Base map
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom:19
+    maxZoom: 23
 }).addTo(map);
 
-// User marker (car)
-const userIcon = L.circleMarker([0,0], { radius:8, color:"red" }).addTo(map);
+/* ---------------- STATE ---------------- */
+let followMode = true;
+let lastHeading = 0;
 
-let autoCenter = true;
-let userInteracting = false;
-let hasGPSFix = false;
+/* ---------------- USER MARKER ---------------- */
+const userIcon = L.circleMarker([0,0], {
+    radius: 8,
+    color: "#ff4747",
+    fillColor: "#ff6a6a",
+    fillOpacity: 1
+}).addTo(map);
 
-/* ---------------- STOP AUTO-CENTER WHEN USER TOUCHES MAP ---------------- */
-map.on("mousedown touchstart", () => {
-    autoCenter = false;
-    userInteracting = true;
-});
-
-map.on("mouseup touchend", () => {
-    setTimeout(()=> userInteracting=false, 1500);
-});
-
-/* ---------------- COMPASS RESET ---------------- */
-document.getElementById("compass").onclick = () => {
-    map.setBearing(0);
-    autoCenter = true;
-    userInteracting = false;
+/* ---------------- FOLLOW TOGGLE ---------------- */
+document.getElementById("follow-btn").onclick = () => {
+    followMode = !followMode;
+    document.getElementById("follow-btn").innerText = `FOLLOW: ${followMode ? "ON" : "OFF"}`;
 };
 
-/* ---------------- LOCATION + ROTATION ---------------- */
+/* ---------------- COMPASS RESET ---------------- */
+document.getElementById("compass-btn").onclick = () => {
+    map.setBearing(0);
+};
+
+/* ---------------- USER INTERACTION OVERRIDE ---------------- */
+map.on("mousedown touchstart", () => {
+    followMode = false;
+    document.getElementById("follow-btn").innerText = "FOLLOW: OFF";
+});
+
+/* ---------------- GEO + ROTATION ---------------- */
 if (navigator.geolocation) {
     navigator.geolocation.watchPosition(pos => {
-
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        const heading = pos.coords.heading || 0; // if no heading, default 0
+        const heading = pos.coords.heading !== null ? pos.coords.heading : lastHeading;
 
-        userMarkerPosition = [lat, lng];
-        userIcon.setLatLng(userMarkerPosition);
+        userIcon.setLatLng([lat,lng]);
+        lastHeading = heading;
 
-        // Rotate map smoothly
+        // Rotate map based on phone direction
         map.setBearing(heading);
 
-        // Center only if user didn't touch map
-        if (autoCenter && !userInteracting) {
-            map.setView(userMarkerPosition, map.getZoom(), { animate: true });
+        // Move map only when follow mode is ON
+        if (followMode) {
+            map.flyTo([lat, lng], map.getZoom(), { animate: true });
         }
 
-    }, err => console.warn("GPS Error:", err), { enableHighAccuracy:true });
+    }, err => console.warn("GPS ERROR", err), {
+        enableHighAccuracy: true
+    });
 }
 </script>
 </body>

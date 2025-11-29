@@ -2,89 +2,90 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>19</title>
+    <title>Stable Rotation Fix</title>
 
     <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js"></script>
 
-    <!-- Leaflet-Rotate (REAL FILE) -->
+    <!-- Leaflet-Rotate -->
     <script src="https://rawcdn.githack.com/Raruto/leaflet-rotate/master/dist/leaflet-rotate-src.js"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; }
-        #map { width: 100vw; height: 100vh; }
+        body { margin:0; overflow:hidden; }
+        #map { width:100vw; height:100vh; }
 
         #follow-btn {
-            position: absolute;
-            bottom: 15px;
-            right: 15px;
-            background: #0078FF;
-            color: white;
-            border-radius: 12px;
-            padding: 10px 14px;
-            cursor: pointer;
-            z-index: 9999;
+            position:absolute;
+            bottom:15px;
+            right:15px;
+            background:#0078FF;
+            color:white;
+            padding:10px 14px;
+            border-radius:12px;
+            z-index:9999;
+            cursor:pointer;
+            font-weight:bold;
         }
     </style>
 </head>
-
 <body>
 
 <div id="map"></div>
 <div id="follow-btn">FOLLOW: ON</div>
 
 <script>
-/* ---------------- MAP SETUP ---------------- */
-const map = L.map('map', {
-    center: [20.5937, 78.9629],
-    zoom: 18,
-    rotate: true,
-    rotateControl: true,   // behaves like GitHub demo
-    bearing: 0,            // default north
-    touchRotate: true,
-    compassBearing: true,  // lets device heading control rotation smoothly
+/* ---------------- MAP ---------------- */
+const map = L.map("map", {
+    center:[20.5937,78.9629],
+    zoom:18,
+    rotate:true,
+    touchRotate:true,
+    compassBearing:false, // IMPORTANT FIX
+    rotateControl:true
 });
 
-/* ---------------- TILE ---------------- */
+/* ---------------- LAYER ---------------- */
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 22
+    maxZoom:22
 }).addTo(map);
 
-/* ---------------- DEBUG (like original example) ---------------- */
-L.Rotate.debug(map);
-
-/* ---------------- FOLLOW MODE ---------------- */
+/* ---------------- STATE ---------------- */
 let follow = true;
-document.getElementById("follow-btn").onclick = () => {
-    follow = !follow;
-    document.getElementById("follow-btn").innerText = `FOLLOW: ${follow ? "ON" : "OFF"}`;
-};
+let lastHeading = 0;
 
-/* ---------------- USER MARKER ---------------- */
+/* ---------------- MARKER ---------------- */
 const userMarker = L.marker([0,0]).addTo(map);
 
-/* ---------------- GEO TRACKING WITH ROTATION ---------------- */
+/* ---------------- FOLLOW BUTTON ---------------- */
+document.getElementById("follow-btn").onclick = () => {
+    follow = !follow;
+    document.getElementById("follow-btn").textContent = `FOLLOW: ${follow ? "ON" : "OFF"}`;
+};
+
+/* ---------------- GPS ---------------- */
 if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(pos => {
+    navigator.geolocation.watchPosition(
+        pos => {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            const heading = pos.coords.heading ?? lastHeading;
+            lastHeading = heading;
 
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        const heading = pos.coords.heading;
+            userMarker.setLatLng([lat,lng]);
 
-        userMarker.setLatLng([lat, lng]);
+            if (follow) {
+                map.setView([lat,lng], map.getZoom(), { animate:true });
 
-        // Auto-rotate only if follow mode is ON & phone gives bearing
-        if (follow && heading !== null) {
-            map.setBearing(heading, { animate: true });
-        }
-
-        // Center map only if follow mode enabled
-        if (follow) {
-            map.setView([lat, lng], map.getZoom(), { animate: true });
-        }
-
-    }, console.log, { enableHighAccuracy: true });
+                // Apply heading only when device is moving (>1°)
+                if (heading !== null && pos.coords.speed > 1) {
+                    map.setBearing(heading, { animate:true, duration:300 });
+                }
+            }
+        },
+        console.log,
+        { enableHighAccuracy:true }
+    );
 }
 </script>
 

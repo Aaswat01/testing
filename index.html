@@ -961,42 +961,40 @@ function slopeBucket(slope){
   return "flat";
 }
 // ===== GPS watch (ONLY heading or path-based rotation) =====
-if (navigator.geolocation) {
-  navigator.geolocation.watchPosition(async pos => {
-
+if (navigator.geolocation){
+  navigator.geolocation.watchPosition(async pos=>{
     const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
-
     updateSpeedLimit(latlng);
+
     const currentSpeed = calculateGPSSpeed(latlng);
-    if (navigationActive && follow && !userInteracting) {
-        map.panTo(latlng, { animate: true });
+    let heading = pos.coords.heading;
+
+    const MIN_SPEED_FOR_HEADING = 5/3.6;
+    if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
+      heading = lastHeading || 0;
     }
-    // --- Create marker if not exists ---
-    if (!userMarker) {
-      userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
-      map.setView(latlng, 18);
+    lastHeading = heading;
+
+    if(!userMarker){
+      userMarker = L.marker(latlng,{icon:carIcon}).addTo(map);
+      map.setView(latlng, 19);
     } else {
       userMarker.setLatLng(latlng);
     }
 
-    // --- ALWAYS CENTER CAR WHEN autoCenter = true ---
-    if (follow) {
-        map.panTo(latlng, { animate:true });
+    if (autoFollow) {
+      map.setView(latlng, map.getZoom(), { animate:false });
+      map.setBearing(heading, { animate:true, duration:350 });
     }
 
-    // Rotation handled by plugin
-    updateRotation(pos.coords.heading, pos.coords.speed);
+    await adaptiveAIDashboard(latlng, heading);
+    smartStepAdvancement(latlng);
+    checkUpcomingSteps(latlng);
+    maybeRepeatCurrentStep();
 
-
-    // AI updates
-    await adaptiveAIDashboard(latlng, 0);
-
-  }, err => console.warn("GPS error", err), {
-    enableHighAccuracy: true,
-    maximumAge: 1000,
-    timeout: 5000
-  });
+  }, console.warn, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
+
 let follow = true;
 let lastHeading = 0;
 function updateRotation(heading, speed) {
@@ -1251,16 +1249,13 @@ function smartStepAdvancement(latlng) {
     
     // If this is the last step (destination)
     if (currentStepIndex >= steps.length - 1) {
-      updateStepUI(activeRouteIndex, currentStepIndex, 'completed');
-      speak("Destination reached.", "step", { interrupt: true });
+      updateStepUI(activeRouteIndex, currentStepIndex, "completed");
+      speak("Destination reached.", "step", { interrupt:true });
       UI.aiBox.textContent = "Destination reached ✅";
-      
-      setTimeout(() => {
-        cleanupRoute(route);
-      }, 3000);
+      setTimeout(() => cleanupRoute(routes[activeRouteIndex]), 3000);
       return;
     }
-    
+
     // Mark current step as active and announce it
     updateStepUI(activeRouteIndex, currentStepIndex, 'active');
     const step = steps[currentStepIndex];

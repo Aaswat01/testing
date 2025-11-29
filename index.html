@@ -630,6 +630,38 @@ align-items:center;color:#fff;font-size:0.9rem;}
 const map = L.map('map').setView([0, 0], 2);
 let autoCenter = true;
 
+const mapPane    = map.getPane("mapPane");
+const tilePane   = map.getPane("tilePane");
+const markerPane = map.getPane("markerPane");
+const popupPane  = map.getPane("popupPane");
+const controlPane= map.getPane("controlPane");
+
+// Apply rotation to base, keep UI upright
+function setMapRotation(deg) {
+    mapRotation = deg;
+    const r   = `rotate(${deg}deg)`;
+    const inv = `rotate(${-deg}deg)`;
+
+    if (mapPane)    mapPane.style.transform    = r;
+    if (tilePane)   tilePane.style.transform   = r;
+    if (markerPane) markerPane.style.transform = inv;
+    if (popupPane)  popupPane.style.transform  = inv;
+    if (controlPane)controlPane.style.transform= inv;
+}
+
+// Bearing from point A → point B (degrees, 0 = north)
+function bearing(from, to) {
+    const lat1 = from.lat * Math.PI / 180;
+    const lat2 = to.lat   * Math.PI / 180;
+    const dLon = (to.lng - from.lng) * Math.PI / 180;
+
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.cos(lat2) * Math.cos(dLon) -
+              Math.sin(lat1) * Math.sin(lat2);
+    let brng = Math.atan2(y, x) * 180 / Math.PI;
+    return (brng + 360) % 360;
+}
+
 const englishMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap contributors | © CartoDB',
   subdomains: 'abcd', maxZoom: 19
@@ -684,99 +716,6 @@ let mapRotation = 0;
 let autoFollow = true;
 let autoRotate = true;
 let userGesture = false;
-const mapPane = map.getPane("mapPane");
-const tilePane = map.getPane("tilePane");
-const markerPane = map.getPane("markerPane");
-const popupPane = map.getPane("popupPane");
-const controlPane = map.getPane("controlPane");
-
-function applyRotation() {
-    if (zooming) return;
-
-    const r = `rotate(${mapRotation}deg)`;
-    const inv = `rotate(${-mapRotation}deg)`;
-
-    mapPane.style.transform = r;
-    tilePane.style.transform = r;
-
-    markerPane.style.transform = inv;
-    popupPane.style.transform = inv;
-    controlPane.style.transform = inv;
-}
-
-/* ---------------------------
-   Two-finger gesture handling
-   --------------------------- */
-
-let startAngle = null;
-
-map.on("touchstart", e => {
-    if (e.touches.length === 2) {
-        userGesture = true;
-        autoRotate = false;
-        autoFollow = false;
-
-        const [a, b] = e.touches;
-        startAngle = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
-    }
-});
-
-map.on("touchmove", e => {
-    if (e.touches.length !== 2 || startAngle === null) return;
-
-    const [a, b] = e.touches;
-    const angle = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
-    const diff = (angle - startAngle) * (180 / Math.PI);
-
-    mapRotation += diff;
-    startAngle = angle;
-    applyRotation();
-});
-
-map.on("touchend", () => {
-    startAngle = null;
-});
-
-/* ------------------------
-   Zoom stability handlers
-   ------------------------ */
-
-map.on("zoomstart", () => {
-    zooming = true;
-});
-
-map.on("zoomend", () => {
-    zooming = false;
-    applyRotation();
-});
-
-/* ------------------------
-   Auto center suppression
-   ------------------------ */
-
-map.on("dragstart", () => {
-    autoFollow = false;
-});
-
-/* ------------------------
-   Compass button behavior
-   ------------------------ */
-
-document.getElementById("compass-btn").onclick = () => {
-    mapRotation = 0;
-    autoRotate = true;
-    autoFollow = true;
-    applyRotation();
-};
-
-/* ------------------------
-   Auto follow button behavior
-   ------------------------ */
-
-document.getElementById("locate-btn").onclick = () => {
-    autoFollow = true;
-    map.flyTo(userMarker.getLatLng(), 18, { animate: true });
-};
 
 
 const colors = ['#FF6B6B','#4DA6FF','#FFD93D','#6BCB77','#FF8C00','#9B59B6','#00BFA5'];
@@ -1050,28 +989,68 @@ function updateVirtualGPS(latlng) {
   updateSpeedLimit(latlng);
 }
 
-// Modify GPS watcher to detect permission denial
+// ===== GPS watch (ONLY heading or path-based rotation) =====
 if (navigator.geolocation) {
-  navigator.geolocation.watchPosition(
-    async pos => {
-      useVirtualGPS = false; // real GPS working
-      const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
-      updateSpeedLimit(latlng);
-      adaptiveAIDashboard(latlng, pos.coords.heading || 0);
+  navigator.geolocation.watchPosition(async pos => {
+    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    updateSpeedLimit(latlng);
 
-      if (!userMarker) {
-        userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
-        map.setView(latlng, 18);
-      } else {
-        userMarker.setLatLng(latlng);
-      }
-    },
-    err => {
-      console.warn("GPS disabled, switching to virtual GPS.");
-      useVirtualGPS = true;
-    },
-    { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
-  );
+    const currentSpeed = calculateGPSSpeed(latlng);
+
+    // ---- update waypoint[0] as driver position ----
+    if (!waypoints.length) waypoints.push(latlng);
+    else waypoints[0] = latlng;
+
+    // ---- marker position + auto center ----
+    if (!userMarker) {
+      userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
+      map.setView(latlng, 18);
+    } else {
+      userMarker.setLatLng(latlng);
+    }
+
+    if (autoCenter) {
+      map.panTo(latlng, { animate: true });
+    }
+
+    // ==============================
+    // ROTATION LOGIC:
+    // 1) If a route is active → use PATH direction
+    // 2) Else → use GPS HEADING
+    // ==============================
+    let headingDeg = null;
+
+    // Rule 1: navigation active → path direction
+    if (activeRouteIndex !== null &&
+        routes[activeRouteIndex] &&
+        routes[activeRouteIndex].steps &&
+        routes[activeRouteIndex].steps.length > 0) {
+
+      const route = routes[activeRouteIndex];
+      const steps = route.steps;
+
+      // use next step if possible, else current
+      const idx = Math.min(currentStepIndex + 1, steps.length - 1);
+      const target = L.latLng(steps[idx].lat, steps[idx].lng);
+
+      headingDeg = bearing(latlng, target);   // our helper from above
+    }
+    // Rule 2: no active route → pure GPS heading
+    else if (typeof pos.coords.heading === "number" && currentSpeed > 1) {
+      headingDeg = pos.coords.heading;
+    }
+
+    // Apply rotation if we have a heading
+    if (headingDeg !== null) {
+      setMapRotation(-headingDeg);
+    }
+
+    await adaptiveAIDashboard(latlng, headingDeg ?? 0);
+  }, () => console.warn("GPS unavailable"), {
+    enableHighAccuracy: true,
+    maximumAge: 1000,
+    timeout: 5000
+  });
 }
 
 // === Speed Limit (Overpass API - Real Data Only) ===
@@ -1599,18 +1578,18 @@ if (navigator.geolocation){
     }
     if(!waypoints.length) waypoints.push(latlng); else waypoints[0]=latlng;
     // Always update marker position
-    if (userMarker) {
-        userMarker.setLatLng(latlng);
-    }
+  if (userMarker) {
+      userMarker.setLatLng(latlng);
+  }
 
-    if (autoFollow) {
-        map.panTo(latlng, { animate: true });
-    }
+  if (autoFollow) {
+      map.panTo(latlng, { animate: true });
+  }
 
-    if (autoRotate && heading != null) {
-        mapRotation = -heading;
-        applyRotation();
-    }
+  if (autoRotate && heading != null) {
+      mapRotation = -heading;
+      applyRotation();
+  }
 
 
     // Auto resume rotation if user stopped interacting
@@ -1619,6 +1598,12 @@ if (navigator.geolocation){
     }
     const compassBtn = document.getElementById("compass-btn");
 
+    compassBtn.onclick = () => {
+        autoRotation = true;
+        rotateMap(0); // Reset to north
+        compassBtn.style.background = "#00b300";
+        setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
+    };
 
     await adaptiveAIDashboard(latlng, heading);
   }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
@@ -2113,9 +2098,19 @@ locateBtn.onclick = () => {
     locateBtn.style.background = "#00cc66";
     setTimeout(() => locateBtn.style.background = "#1e90ff", 600);
 };
-let zooming = false;
-
 const locateBtn = document.getElementById("locate-btn");
+locateBtn.onclick = () => {
+    if (!userMarker) return;
+    autoCenter = true;
+    map.flyTo(userMarker.getLatLng(), Math.max(18, map.getZoom()));
+};
+const compassBtn = document.getElementById("compass-btn");
+compassBtn.onclick = () => {
+    // Reset to north-up temporarily
+    setMapRotation(0);
+    compassBtn.style.background = "#00b300";
+    setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
+};
 
 // ===== Search =====
 const input = document.getElementById("searchInput");

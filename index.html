@@ -50,13 +50,14 @@
 <script>
 /* ---------------- MAP CORE ---------------- */
 const map = L.map("map", {
-    center: [20.5937, 78.9629], // India default
+    center: [20.5937, 78.9629],
     zoom: 17,
     rotate: true,
     touchRotate: true,
-    compassBearing: true
+    compassBearing: false, // must stay off to avoid interference
 });
 
+/* ---------------- TILE LAYER ---------------- */
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 23
 }).addTo(map);
@@ -64,8 +65,9 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 /* ---------------- STATE ---------------- */
 let followMode = true;
 let lastHeading = 0;
+let userRotating = false;
 
-/* ---------------- USER MARKER ---------------- */
+/* ---------------- CAR MARKER ---------------- */
 const userIcon = L.circleMarker([0,0], {
     radius: 8,
     color: "#ff4747",
@@ -73,44 +75,56 @@ const userIcon = L.circleMarker([0,0], {
     fillOpacity: 1
 }).addTo(map);
 
-/* ---------------- FOLLOW TOGGLE ---------------- */
+/* ---------------- BUTTONS ---------------- */
 document.getElementById("follow-btn").onclick = () => {
     followMode = !followMode;
     document.getElementById("follow-btn").innerText = `FOLLOW: ${followMode ? "ON" : "OFF"}`;
 };
 
-/* ---------------- COMPASS RESET ---------------- */
 document.getElementById("compass-btn").onclick = () => {
-    map.setBearing(0);
+    map.setBearing(0, { animate: true, duration: 300 });
 };
 
-/* ---------------- USER INTERACTION OVERRIDE ---------------- */
+/* ---------------- STOP FOLLOW WHEN USER TOUCHES ---------------- */
 map.on("mousedown touchstart", () => {
     followMode = false;
     document.getElementById("follow-btn").innerText = "FOLLOW: OFF";
 });
 
-/* ---------------- GEO + ROTATION ---------------- */
+/* ---------------- USER ROTATION HANDLING ---------------- */
+map.on("rotatestart", () => { userRotating = true; });
+map.on("rotateend", () => {
+    setTimeout(() => userRotating = false, 800);
+});
+
+/* ---------------- SNAP-TO-NORTH HELPER ---------------- */
+function normalizeBearing(br) {
+    return Math.abs(br) < 1 ? 0 : br;
+}
+
+/* ---------------- GPS LOGIC ---------------- */
 if (navigator.geolocation) {
     navigator.geolocation.watchPosition(pos => {
+
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        const heading = pos.coords.heading !== null ? pos.coords.heading : lastHeading;
-
-        userIcon.setLatLng([lat,lng]);
+        const heading = pos.coords.heading ?? lastHeading;
         lastHeading = heading;
 
-        // Rotate map based on phone direction
-        map.setBearing(heading);
+        // update position
+        userIcon.setLatLng([lat, lng]);
 
-        // Move map only when follow mode is ON
-        if (followMode) {
-            map.flyTo([lat, lng], map.getZoom(), { animate: true });
+        // Only rotate if: follow mode ON + user NOT rotating manually
+        if (followMode && !userRotating) {
+            map.setBearing(normalizeBearing(heading), { animate: true, duration: 250 });
         }
 
-    }, err => console.warn("GPS ERROR", err), {
-        enableHighAccuracy: true
-    });
+        // Auto-center only if follow mode ON
+        if (followMode) {
+            map.panTo([lat, lng], { animate: true });
+        }
+
+    }, console.warn, { enableHighAccuracy: true });
 }
 </script>
 </body>

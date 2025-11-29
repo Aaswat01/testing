@@ -1,4 +1,3 @@
-1
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -137,7 +136,9 @@ align-items:center;color:#fff;font-size:0.9rem;}
 .route-step.completed{display:none;} /* 🆕 HIDE completed steps */
 .route-step.active{background:rgba(255,215,0,0.3);font-weight:bold;border-left:3px solid gold;}
 .route-step.upcoming{opacity:0.7;}
-
+#map {
+  transition: transform 0.6s ease-in-out;
+}
 /* Car Icon Style */
 .user-car-icon {
     width: 32px;
@@ -629,6 +630,8 @@ align-items:center;color:#fff;font-size:0.9rem;}
 
 const map = L.map('map').setView([0, 0], 2);
 let autoCenter = true;
+let userInteracting = false;
+let lastInteractionTime = 0;
 let navigationActive = false;
 const mapPane    = map.getPane("mapPane");
 const tilePane   = map.getPane("tilePane");
@@ -638,15 +641,14 @@ const controlPane= map.getPane("controlPane");
 
 // Apply rotation to base, keep UI upright
 function setMapRotation(deg) {
-    mapRotation = deg;
-    const r   = `rotate(${deg}deg)`;
-    const inv = `rotate(${-deg}deg)`;
+    const mapEl = document.getElementById("map");
+    mapEl.style.transform = `rotate(${deg}deg)`;
+    mapEl.style.transformOrigin = "center center";
 
-    if (mapPane)    mapPane.style.transform    = r;
-    if (tilePane)   tilePane.style.transform   = r;
-    if (markerPane) markerPane.style.transform = inv;
-    if (popupPane)  popupPane.style.transform  = inv;
-    if (controlPane)controlPane.style.transform= inv;
+    // Keep UI upright
+    document.querySelector(".user-car-svg").style.transform = `rotate(${-deg}deg)`;
+    document.querySelectorAll(".leaflet-control, .leaflet-marker-pane, .leaflet-popup-pane")
+        .forEach(el => el.style.transform = `rotate(${-deg}deg)`);
 }
 
 // Bearing from point A → point B (degrees, 0 = north)
@@ -797,7 +799,8 @@ function refreshAIBox() {
 
 // ===== Preview / approval panel =====
 let preview = { active:false, group:null, polyline:null, osrmRoute:null, start:null, end:null, destLabel:"", tempMarker:null };
-
+approvalPanel.style.pointerEvents = "auto";
+map.getContainer().style.touchAction = "none";
 const approvalPanel = document.getElementById("approvalPanel");
 const approvalTitle = document.getElementById("approvalTitle");
 const approvalSubtitle = document.getElementById("approvalSubtitle");
@@ -984,8 +987,8 @@ if (navigator.geolocation) {
     }
 
     // --- ALWAYS CENTER CAR WHEN autoCenter = true ---
-    if (autoCenter) {
-      map.setView(latlng, map.getZoom(), { animate: true });
+    if (autoCenter && !userInteracting) {
+      map.panTo(latlng, { animate: true, duration: 0.6 });
     }
 
     // --- ROTATION ONLY WHEN NAVIGATION IS RUNNING ---
@@ -1010,6 +1013,13 @@ if (navigator.geolocation) {
     maximumAge: 1000,
     timeout: 5000
   });
+  // Restore auto-center ONLY if user stops touching map for 5 seconds
+  setInterval(() => {
+    if (userInteracting && Date.now() - lastInteractionTime > 5000) {
+      userInteracting = false;
+      autoCenter = true;
+    }
+  }, 1000);
 }
 
 
@@ -1988,17 +1998,19 @@ document.getElementById("map-toggle").addEventListener("click",()=>{
 });
 map.on("dragstart", () => {
   autoCenter = false;
+  // Do NOT stop rotation when dragging
 });
 
 document.getElementById("locate-btn").onclick = () => {
   autoCenter = true;
-  if (userMarker) map.setView(userMarker.getLatLng(), 18, { animate: true });
+  userInteracting = false;
+  if (userMarker) map.flyTo(userMarker.getLatLng(), 18, { animate: true });
 };
 
 document.getElementById("compass-btn").onclick = () => {
-  autoCenter = true;
   setMapRotation(0);
-  if (userMarker) map.setView(userMarker.getLatLng(), map.getZoom(), { animate: true });
+  userInteracting = true;
+  lastInteractionTime = Date.now();
 };
 
 // ===== Search =====
@@ -2509,4 +2521,3 @@ micBtn.onclick = async () => {
 </script>
 </body>
 </html>
-11th

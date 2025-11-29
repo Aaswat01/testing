@@ -1,10 +1,9 @@
-1
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TJL - Location-Based Navigation</title>
+<title>step and rotate and center</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -225,7 +224,6 @@ align-items:center;color:#fff;font-size:0.9rem;}
   border: 1px solid rgba(192, 85, 85, 0.08);
   pointer-events: none;
 }
-
 .gm-stop-box {
   background:rgba(255,255,255,0.08);
   border:1px solid rgba(255,255,255,0.15);
@@ -603,11 +601,10 @@ align-items:center;color:#fff;font-size:0.9rem;}
       </div>
     </div>
   </div>
-</div>]
+</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js"></script>
 <script src="leaflet-rotate-src.js"></script>
 <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-
 <script>
 
 // ==============================
@@ -624,25 +621,6 @@ const map = L.map('map', {
 });
 
 let autoCenter = true;
-let navigationActive = false;
-const mapPane    = map.getPane("mapPane");
-const tilePane   = map.getPane("tilePane");
-const markerPane = map.getPane("markerPane");
-const popupPane  = map.getPane("popupPane");
-const controlPane= map.getPane("controlPane");
-
-// Bearing from point A → point B (degrees, 0 = north)
-function bearing(from, to) {
-    const lat1 = from.lat * Math.PI / 180;
-    const lat2 = to.lat   * Math.PI / 180;
-    const dLon = (to.lng - from.lng) * Math.PI / 180;
-
-    const y = Math.sin(dLon) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.cos(lat2) * Math.cos(dLon) -
-              Math.sin(lat1) * Math.sin(lat2);
-    let brng = Math.atan2(y, x) * 180 / Math.PI;
-    return (brng + 360) % 360;
-}
 
 const englishMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap contributors | © CartoDB',
@@ -690,24 +668,53 @@ mapSelectBtn.onclick = () => {
         mapSelectBtn.textContent = "Select";
     }
 };
-let userInteracting = false;
+function rotateMap(angle) {
+  currentMapRotation = angle;
 
-map.on("mousedown touchstart", () => {
-    userInteracting = true;
+  const mapPane = map.getPane('mapPane');
+  const controlPane = map.getPane('controlPane');
+  const carSvg = document.getElementById('user-car-svg');
+
+  if (mapPane) {
+    mapPane.style.transform = `rotate(${angle}deg)`;
+    mapPane.style.transformOrigin = "center center";
+  }
+
+  if (controlPane) controlPane.style.transform = `rotate(${-angle}deg)`;
+
+  // Car stays forward — not rotated by map
+  if (carSvg) carSvg.style.transform = "rotate(0deg)";
+}
+let touchStartAngle = null;
+let lastAngle = 0;
+
+map._container.addEventListener("touchmove", (event) => {
+    if (event.touches.length < 2) return;
+
+    autoRotation = false; // Disable heading rotation while user rotates manually
     autoCenter = false;
-});
 
-map.on("mouseup touchend", () => {
-    setTimeout(() => {
-        userInteracting = false;
-    }, 1500);
-});
+    const [t1, t2] = event.touches;
+    const angle = Math.atan2(t2.pageY - t1.pageY, t2.pageX - t1.pageX) * (180 / Math.PI);
 
-/* ==============================
-   GOOGLE-MAPS STYLE ROTATION CORE
-   ============================== */
+    if (touchStartAngle === null) touchStartAngle = angle;
+
+    const delta = angle - touchStartAngle;
+    lastAngle = delta;
+
+    rotateMap(delta);
+
+    lastManualRotation = Date.now();
+}, { passive: true });
+
+map._container.addEventListener("touchend", () => {
+    touchStartAngle = null;
+});
 
 const colors = ['#FF6B6B','#4DA6FF','#FFD93D','#6BCB77','#FF8C00','#9B59B6','#00BFA5'];
+let autoRotation = true;
+let lastManualRotation = 0;
+let manualRotationTimeout = 4000; // auto resume after 4s if user isn't touching map
 let activeRouteIndex = null;
 let currentStepIndex = 0;
 let ECO_START_BLOCK = Date.now() + 3000;
@@ -864,8 +871,7 @@ approvalStartBtn.addEventListener("click", () => {
   
   // ✅ FIX: Clear search pins when navigation actually starts
   clearSearchPins();
-  navigationActive = true;
-  autoCenter = true;
+  
   const start = userMarker ? userMarker.getLatLng() : map.getCenter();
   if (!waypoints.length) waypoints.push(start); else waypoints[0] = start;
   
@@ -960,7 +966,24 @@ function slopeBucket(slope){
   if (slope < -2.5) return "uphill";
   return "flat";
 }
-// ===== GPS watch (ONLY heading or path-based rotation) =====
+// ==========================================================
+// VIRTUAL GPS — USED WHEN USER REFUSES GPS PERMISSION
+// ==========================================================
+
+let useVirtualGPS = false;
+let virtualLatLng = null;
+
+// Override GPS update function
+function updateVirtualGPS(latlng) {
+  useVirtualGPS = true;
+  virtualLatLng = latlng;
+
+  // Feed dashboard with this fake location
+  adaptiveAIDashboard(latlng, 0);
+  updateSpeedLimit(latlng);
+}
+
+// Modify GPS watcher to detect permission denial
 if (navigator.geolocation){
   navigator.geolocation.watchPosition(async pos=>{
     const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
@@ -1249,13 +1272,16 @@ function smartStepAdvancement(latlng) {
     
     // If this is the last step (destination)
     if (currentStepIndex >= steps.length - 1) {
-      updateStepUI(activeRouteIndex, currentStepIndex, "completed");
-      speak("Destination reached.", "step", { interrupt:true });
+      updateStepUI(activeRouteIndex, currentStepIndex, 'completed');
+      speak("Destination reached.", "step", { interrupt: true });
       UI.aiBox.textContent = "Destination reached ✅";
-      setTimeout(() => cleanupRoute(routes[activeRouteIndex]), 3000);
+      
+      setTimeout(() => {
+        cleanupRoute(route);
+      }, 3000);
       return;
     }
-
+    
     // Mark current step as active and announce it
     updateStepUI(activeRouteIndex, currentStepIndex, 'active');
     const step = steps[currentStepIndex];
@@ -1301,7 +1327,6 @@ function cleanupRoute(route) {
     waypointMarkers.splice(destIndex, 1);
     waypoints.splice(destIndex + 1, 1);
   }
-  navigationActive = false;
   const box = document.getElementById(`route-box-${route.routeIndex}`);
   if (box) box.remove();
   routes.splice(activeRouteIndex, 1);
@@ -1439,6 +1464,15 @@ function distanceToSegment(p, a, b) {
     // Return distance in meters (approximate conversion)
     return L.latLng(x, y).distanceTo(L.latLng(xx, yy));
 }
+function triggerReroute(currentLL, route) {
+    speak("Recalculating route.", "warning", { interrupt: true });
+
+    const lastStep = route.steps[route.steps.length - 1];
+    const destLL = L.latLng(lastStep.lat, lastStep.lng);
+
+    cleanupRoute(route);
+    createRoute(currentLL, destLL, "#4DA6FF");
+}
 
 // ===== Main AI loop =====
 async function adaptiveAIDashboard(latlng, heading) {
@@ -1493,7 +1527,6 @@ async function adaptiveAIDashboard(latlng, heading) {
     // Calculate remaining distance
     let remaining = 0;
     for (let i = currentStepIndex; i < steps.length; i++) remaining += steps[i].distance;
-    remaining = Math.max(remaining - step.distance + latlng.distanceTo(L.latLng(step.lat, step.lng)), 0);
     const distanceEl = document.getElementById(`route-distance-${routeDisplayIndex}`);
     if (distanceEl) distanceEl.textContent = `${(remaining / 1000).toFixed(1)} km remaining`;
   }
@@ -1503,6 +1536,59 @@ async function adaptiveAIDashboard(latlng, heading) {
   maybeRepeatCurrentStep(); // 🆕 remind current step periodically
 }
 
+// ===== GPS watch =====
+if (navigator.geolocation){
+  navigator.geolocation.watchPosition(async pos=>{
+    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    updateSpeedLimit(latlng);
+    const currentSpeed = calculateGPSSpeed(latlng);
+    let heading = pos.coords.heading;
+    const MIN_SPEED_FOR_HEADING = 5/3.6;
+    if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
+      const carEl = document.getElementById('user-car-svg');
+      if (carEl) {
+        const m = (carEl.style.transform || "").match(/rotate\(([^)]+)deg\)/);
+        heading = m ? parseFloat(m[1]) : 0;
+      } else heading = 0;
+    }
+    if(!waypoints.length) waypoints.push(latlng); else waypoints[0]=latlng;
+    // Always update marker position
+    if (!userMarker) {
+        userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
+    } else {
+        userMarker.setLatLng(latlng);
+    }
+
+    // Auto-center only if enabled
+    if (autoCenter) {
+        map.panTo(latlng, { animate: true });
+    }
+
+    // Only rotate map if rotation mode is enabled
+    if (autoRotation) {
+        rotateMap(-heading);
+    } else {
+        // Car remains oriented relative to map
+        const carSvg = document.getElementById('user-car-svg');
+        if (carSvg) carSvg.style.transform = `rotate(${heading + currentMapRotation}deg)`;
+    }
+
+    // Auto resume rotation if user stopped interacting
+    if (!autoRotation && Date.now() - lastManualRotation > manualRotationTimeout && currentSpeed > 3) {
+        autoRotation = true;
+    }
+    const compassBtn = document.getElementById("compass-btn");
+
+    compassBtn.onclick = () => {
+        autoRotation = true;
+        rotateMap(0); // Reset to north
+        compassBtn.style.background = "#00b300";
+        setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
+    };
+
+    await adaptiveAIDashboard(latlng, heading);
+  }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
+}
 
 let driverCountry = null;
 async function updateDriverCountry(latlng) {
@@ -1513,10 +1599,8 @@ async function updateDriverCountry(latlng) {
   } catch (err) { console.warn("Country fetch failed:", err); }
 }
 
-// 🟢 Add THIS right after the existing one:
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && userMarker && autoCenter) {
-    map.panTo(userMarker.getLatLng(), { animate: true });}
+  if (document.visibilityState !== "visible") return;
   try { speechSynthesis.resume(); } catch {}
   const t = nowMs();
   setTimeout(() => {
@@ -1532,6 +1616,12 @@ document.addEventListener("visibilitychange", () => {
     }
     speak(SPEECH.lastEcoText, "eco", { interrupt:true });
   }, 250);
+});
+// 🟢 Add THIS right after the existing one:
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && userMarker && autoCenter) {
+        map.panTo(userMarker.getLatLng(), { animate: true });
+    }
 });
 // 🌍 FREE TRANSLATION USING NOMINATIM (English reverse-geocode)
 async function getEnglishName(lat, lon) {
@@ -1993,6 +2083,7 @@ document.getElementById("compass-btn").onclick = () => {
 map.on("zoomstart", () => {
     follow = false;
 });
+
 
 // ===== Search =====
 const input = document.getElementById("searchInput");

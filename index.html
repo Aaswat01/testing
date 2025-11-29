@@ -2,15 +2,14 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Leaflet Rotate Navigation</title>
+    <title>19</title>
 
     <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js"></script>
 
-    <!-- Leaflet Rotate -->
-    <script src="https://unpkg.com/leaflet-rotate/dist/leaflet-rotate-src.js"></script>
-    <script src="https://unpkg.com/leaflet-rotate/lib/debug.js"></script>
+    <!-- Leaflet-Rotate (REAL FILE) -->
+    <script src="https://rawcdn.githack.com/Raruto/leaflet-rotate/master/dist/leaflet-rotate-src.js"></script>
 
     <style>
         body { margin: 0; overflow: hidden; }
@@ -25,83 +24,69 @@
             border-radius: 12px;
             padding: 10px 14px;
             cursor: pointer;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.3);
             z-index: 9999;
-            font-weight: bold;
         }
     </style>
 </head>
+
 <body>
 
 <div id="map"></div>
 <div id="follow-btn">FOLLOW: ON</div>
 
 <script>
-/* ---------------- MAP SETUP (MATCHES PLUGIN DEMO) ---------------- */
-const map = L.map("map", {
+/* ---------------- MAP SETUP ---------------- */
+const map = L.map('map', {
     center: [20.5937, 78.9629],
     zoom: 18,
     rotate: true,
+    rotateControl: true,   // behaves like GitHub demo
+    bearing: 0,            // default north
     touchRotate: true,
-    compassBearing: true,   // required for correct rotation logic
-    rotateControl: { closeOnZeroBearing: false },
+    compassBearing: true,  // lets device heading control rotation smoothly
 });
 
-/* ---------------- TILE LAYER ---------------- */
+/* ---------------- TILE ---------------- */
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 22
 }).addTo(map);
 
-/* ---------------- MARKER ---------------- */
-const userMarker = L.marker([0,0], {
-    icon: L.divIcon({
-        html: "⬤",
-        className: "",
-        iconSize: [15,15],
-        iconAnchor: [7,7]
-    })
-}).addTo(map);
+/* ---------------- DEBUG (like original example) ---------------- */
+L.Rotate.debug(map);
 
-/* ---------------- CORE STATE ---------------- */
-let followMode = true;
-
-/* ---------------- FOLLOW MODE BUTTON ---------------- */
+/* ---------------- FOLLOW MODE ---------------- */
+let follow = true;
 document.getElementById("follow-btn").onclick = () => {
-    followMode = !followMode;
-    document.getElementById("follow-btn").innerText = `FOLLOW: ${followMode ? "ON" : "OFF"}`;
+    follow = !follow;
+    document.getElementById("follow-btn").innerText = `FOLLOW: ${follow ? "ON" : "OFF"}`;
 };
 
-/* ---------------- STOP FOLLOW IF USER MOVES MAP ---------------- */
-map.on("mousedown touchstart", () => {
-    followMode = false;
-    document.getElementById("follow-btn").innerText = "FOLLOW: OFF";
-});
+/* ---------------- USER MARKER ---------------- */
+const userMarker = L.marker([0,0]).addTo(map);
 
-/* ---------------- GPS TRACKING ---------------- */
-navigator.geolocation.watchPosition(
-    (pos) => {
+/* ---------------- GEO TRACKING WITH ROTATION ---------------- */
+if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(pos => {
+
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         const heading = pos.coords.heading;
 
         userMarker.setLatLng([lat, lng]);
 
-        // Let plugin handle rotation—only apply heading when following
-        if (followMode && heading !== null) {
+        // Auto-rotate only if follow mode is ON & phone gives bearing
+        if (follow && heading !== null) {
             map.setBearing(heading, { animate: true });
         }
 
-        if (followMode) {
+        // Center map only if follow mode enabled
+        if (follow) {
             map.setView([lat, lng], map.getZoom(), { animate: true });
         }
-    },
-    () => console.log("GPS Error"),
-    { enableHighAccuracy: true }
-);
 
-/* ---------------- ENABLE DEBUG (LIKE OFFICIAL) ---------------- */
-L.Rotate.debug(map);
-
+    }, console.log, { enableHighAccuracy: true });
+}
 </script>
+
 </body>
 </html>

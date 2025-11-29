@@ -629,7 +629,7 @@ align-items:center;color:#fff;font-size:0.9rem;}
 
 const map = L.map('map').setView([0, 0], 2);
 let autoCenter = true;
-
+let navigationActive = false;
 const mapPane    = map.getPane("mapPane");
 const tilePane   = map.getPane("tilePane");
 const markerPane = map.getPane("markerPane");
@@ -713,14 +713,7 @@ mapSelectBtn.onclick = () => {
    ============================== */
 
 let mapRotation = 0;
-let autoFollow = true;
-let autoRotate = true;
-let userGesture = false;
-
-
 const colors = ['#FF6B6B','#4DA6FF','#FFD93D','#6BCB77','#FF8C00','#9B59B6','#00BFA5'];
-let lastManualRotation = 0;
-let manualRotationTimeout = 4000; // auto resume after 4s if user isn't touching map
 let activeRouteIndex = null;
 let currentStepIndex = 0;
 let ECO_START_BLOCK = Date.now() + 3000;
@@ -877,7 +870,8 @@ approvalStartBtn.addEventListener("click", () => {
   
   // ✅ FIX: Clear search pins when navigation actually starts
   clearSearchPins();
-  
+  navigationActive = true;
+  autoCenter = true;
   const start = userMarker ? userMarker.getLatLng() : map.getCenter();
   if (!waypoints.length) waypoints.push(start); else waypoints[0] = start;
   
@@ -972,36 +966,16 @@ function slopeBucket(slope){
   if (slope < -2.5) return "uphill";
   return "flat";
 }
-// ==========================================================
-// VIRTUAL GPS — USED WHEN USER REFUSES GPS PERMISSION
-// ==========================================================
-
-let useVirtualGPS = false;
-let virtualLatLng = null;
-
-// Override GPS update function
-function updateVirtualGPS(latlng) {
-  useVirtualGPS = true;
-  virtualLatLng = latlng;
-
-  // Feed dashboard with this fake location
-  adaptiveAIDashboard(latlng, 0);
-  updateSpeedLimit(latlng);
-}
-
 // ===== GPS watch (ONLY heading or path-based rotation) =====
 if (navigator.geolocation) {
   navigator.geolocation.watchPosition(async pos => {
-    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
-    updateSpeedLimit(latlng);
 
+    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+
+    updateSpeedLimit(latlng);
     const currentSpeed = calculateGPSSpeed(latlng);
 
-    // ---- update waypoint[0] as driver position ----
-    if (!waypoints.length) waypoints.push(latlng);
-    else waypoints[0] = latlng;
-
-    // ---- marker position + auto center ----
+    // --- Create marker if not exists ---
     if (!userMarker) {
       userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
       map.setView(latlng, 18);
@@ -1009,49 +983,35 @@ if (navigator.geolocation) {
       userMarker.setLatLng(latlng);
     }
 
+    // --- ALWAYS CENTER CAR WHEN autoCenter = true ---
     if (autoCenter) {
-      map.panTo(latlng, { animate: true });
+      map.setView(latlng, map.getZoom(), { animate: true });
     }
 
-    // ==============================
-    // ROTATION LOGIC:
-    // 1) If a route is active → use PATH direction
-    // 2) Else → use GPS HEADING
-    // ==============================
-    let headingDeg = null;
-
-    // Rule 1: navigation active → path direction
-    if (activeRouteIndex !== null &&
-        routes[activeRouteIndex] &&
-        routes[activeRouteIndex].steps &&
-        routes[activeRouteIndex].steps.length > 0) {
-
+    // --- ROTATION ONLY WHEN NAVIGATION IS RUNNING ---
+    if (navigationActive && routes[activeRouteIndex]) {
       const route = routes[activeRouteIndex];
-      const steps = route.steps;
+      const idx = Math.min(currentStepIndex + 1, route.steps.length - 1);
+      const target = L.latLng(route.steps[idx].lat, route.steps[idx].lng);
 
-      // use next step if possible, else current
-      const idx = Math.min(currentStepIndex + 1, steps.length - 1);
-      const target = L.latLng(steps[idx].lat, steps[idx].lng);
+      const angle = bearing(latlng, target);
 
-      headingDeg = bearing(latlng, target);   // our helper from above
-    }
-    // Rule 2: no active route → pure GPS heading
-    else if (typeof pos.coords.heading === "number" && currentSpeed > 1) {
-      headingDeg = pos.coords.heading;
+      setMapRotation(-angle);
+    } else {
+      // No navigation → reset rotation always north
+      setMapRotation(0);
     }
 
-    // Apply rotation if we have a heading
-    if (headingDeg !== null) {
-      setMapRotation(-headingDeg);
-    }
+    // AI updates
+    await adaptiveAIDashboard(latlng, 0);
 
-    await adaptiveAIDashboard(latlng, headingDeg ?? 0);
-  }, () => console.warn("GPS unavailable"), {
+  }, err => console.warn("GPS error", err), {
     enableHighAccuracy: true,
     maximumAge: 1000,
     timeout: 5000
   });
 }
+
 
 // === Speed Limit (Overpass API - Real Data Only) ===
 // === Speed Limit (Overpass API - Real Data Only) ===
@@ -1352,6 +1312,8 @@ function cleanupRoute(route) {
     waypointMarkers.splice(destIndex, 1);
     waypoints.splice(destIndex + 1, 1);
   }
+  navigationActive = false;
+  setMapRotation(0);
   const box = document.getElementById(`route-box-${route.routeIndex}`);
   if (box) box.remove();
   routes.splice(activeRouteIndex, 1);
@@ -1489,15 +1451,6 @@ function distanceToSegment(p, a, b) {
     // Return distance in meters (approximate conversion)
     return L.latLng(x, y).distanceTo(L.latLng(xx, yy));
 }
-function triggerReroute(currentLL, route) {
-    speak("Recalculating route.", "warning", { interrupt: true });
-
-    const lastStep = route.steps[route.steps.length - 1];
-    const destLL = L.latLng(lastStep.lat, lastStep.lng);
-
-    cleanupRoute(route);
-    createRoute(currentLL, destLL, "#4DA6FF");
-}
 
 // ===== Main AI loop =====
 async function adaptiveAIDashboard(latlng, heading) {
@@ -1561,53 +1514,6 @@ async function adaptiveAIDashboard(latlng, heading) {
   maybeRepeatCurrentStep(); // 🆕 remind current step periodically
 }
 
-// ===== GPS watch =====
-if (navigator.geolocation){
-  navigator.geolocation.watchPosition(async pos=>{
-    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
-    updateSpeedLimit(latlng);
-    const currentSpeed = calculateGPSSpeed(latlng);
-    let heading = pos.coords.heading;
-    const MIN_SPEED_FOR_HEADING = 5/3.6;
-    if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
-      const carEl = document.getElementById('user-car-svg');
-      if (carEl) {
-        const m = (carEl.style.transform || "").match(/rotate\(([^)]+)deg\)/);
-        heading = m ? parseFloat(m[1]) : 0;
-      } else heading = 0;
-    }
-    if(!waypoints.length) waypoints.push(latlng); else waypoints[0]=latlng;
-    // Always update marker position
-  if (userMarker) {
-      userMarker.setLatLng(latlng);
-  }
-
-  if (autoFollow) {
-      map.panTo(latlng, { animate: true });
-  }
-
-  if (autoRotate && heading != null) {
-      mapRotation = -heading;
-      applyRotation();
-  }
-
-
-    // Auto resume rotation if user stopped interacting
-    if (!autoRotation && Date.now() - lastManualRotation > manualRotationTimeout && currentSpeed > 3) {
-        autoRotation = true;
-    }
-    const compassBtn = document.getElementById("compass-btn");
-
-    compassBtn.onclick = () => {
-        autoRotation = true;
-        rotateMap(0); // Reset to north
-        compassBtn.style.background = "#00b300";
-        setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
-    };
-
-    await adaptiveAIDashboard(latlng, heading);
-  }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
-}
 
 let driverCountry = null;
 async function updateDriverCountry(latlng) {
@@ -1618,8 +1524,10 @@ async function updateDriverCountry(latlng) {
   } catch (err) { console.warn("Country fetch failed:", err); }
 }
 
+// 🟢 Add THIS right after the existing one:
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
+  if (document.visibilityState === "visible" && userMarker && autoCenter) {
+    map.panTo(userMarker.getLatLng(), { animate: true });}
   try { speechSynthesis.resume(); } catch {}
   const t = nowMs();
   setTimeout(() => {
@@ -1635,12 +1543,6 @@ document.addEventListener("visibilitychange", () => {
     }
     speak(SPEECH.lastEcoText, "eco", { interrupt:true });
   }, 250);
-});
-// 🟢 Add THIS right after the existing one:
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && userMarker && autoCenter) {
-        map.panTo(userMarker.getLatLng(), { animate: true });
-    }
 });
 // 🌍 FREE TRANSLATION USING NOMINATIM (English reverse-geocode)
 async function getEnglishName(lat, lon) {
@@ -2085,31 +1987,18 @@ document.getElementById("map-toggle").addEventListener("click",()=>{
   }
 });
 map.on("dragstart", () => {
-    autoCenter = false;
+  autoCenter = false;
 });
 
-locateBtn.onclick = () => {
-    autoCenter = true;
-
-    if (userMarker) {
-        map.flyTo(userMarker.getLatLng(), Math.max(18, map.getZoom()));
-    }
-
-    locateBtn.style.background = "#00cc66";
-    setTimeout(() => locateBtn.style.background = "#1e90ff", 600);
+document.getElementById("locate-btn").onclick = () => {
+  autoCenter = true;
+  if (userMarker) map.setView(userMarker.getLatLng(), 18, { animate: true });
 };
-const locateBtn = document.getElementById("locate-btn");
-locateBtn.onclick = () => {
-    if (!userMarker) return;
-    autoCenter = true;
-    map.flyTo(userMarker.getLatLng(), Math.max(18, map.getZoom()));
-};
-const compassBtn = document.getElementById("compass-btn");
-compassBtn.onclick = () => {
-    // Reset to north-up temporarily
-    setMapRotation(0);
-    compassBtn.style.background = "#00b300";
-    setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
+
+document.getElementById("compass-btn").onclick = () => {
+  autoCenter = true;
+  setMapRotation(0);
+  if (userMarker) map.setView(userMarker.getLatLng(), map.getZoom(), { animate: true });
 };
 
 // ===== Search =====
@@ -2620,3 +2509,4 @@ micBtn.onclick = async () => {
 </script>
 </body>
 </html>
+11th

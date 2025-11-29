@@ -1,9 +1,10 @@
+1
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aaswat</title>
+<title>TJL - Location-Based Navigation</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -967,7 +968,7 @@ if (navigator.geolocation) {
 
     updateSpeedLimit(latlng);
     const currentSpeed = calculateGPSSpeed(latlng);
-    if (navigationActive && autoCenter && !userInteracting) {
+    if (navigationActive && follow && !userInteracting) {
         map.panTo(latlng, { animate: true });
     }
     // --- Create marker if not exists ---
@@ -1497,6 +1498,7 @@ async function adaptiveAIDashboard(latlng, heading) {
     // Calculate remaining distance
     let remaining = 0;
     for (let i = currentStepIndex; i < steps.length; i++) remaining += steps[i].distance;
+    remaining = Math.max(remaining - step.distance + latlng.distanceTo(L.latLng(step.lat, step.lng)), 0);
     const distanceEl = document.getElementById(`route-distance-${routeDisplayIndex}`);
     if (distanceEl) distanceEl.textContent = `${(remaining / 1000).toFixed(1)} km remaining`;
   }

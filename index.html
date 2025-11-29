@@ -2,31 +2,19 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>17th</title>
+    <title>Leaflet Rotate Navigation</title>
 
     <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js"></script>
 
     <!-- Leaflet Rotate -->
-    <script src="https://unpkg.com/leaflet-rotate/dist/leaflet-rotate.js"></script>
+    <script src="https://unpkg.com/leaflet-rotate/dist/leaflet-rotate-src.js"></script>
+    <script src="https://unpkg.com/leaflet-rotate/lib/debug.js"></script>
 
     <style>
         body { margin: 0; overflow: hidden; }
         #map { width: 100vw; height: 100vh; }
-
-        #compass-btn {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            background: white;
-            border-radius: 50%;
-            padding: 12px;
-            cursor: pointer;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.3);
-            z-index: 9999;
-            font-size: 20px;
-        }
 
         #follow-btn {
             position: absolute;
@@ -46,17 +34,17 @@
 <body>
 
 <div id="map"></div>
-<div id="compass-btn">🧭</div>
 <div id="follow-btn">FOLLOW: ON</div>
 
 <script>
-/* ---------------- MAP SETUP ---------------- */
+/* ---------------- MAP SETUP (MATCHES PLUGIN DEMO) ---------------- */
 const map = L.map("map", {
     center: [20.5937, 78.9629],
     zoom: 18,
     rotate: true,
     touchRotate: true,
-    compassBearing: false, // prevents auto rotation overrides
+    compassBearing: true,   // required for correct rotation logic
+    rotateControl: { closeOnZeroBearing: false },
 });
 
 /* ---------------- TILE LAYER ---------------- */
@@ -64,76 +52,56 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 22
 }).addTo(map);
 
-/* ---------------- VARIABLES ---------------- */
-let followMode = true;
-let userRotating = false;
-let lastHeading = 0;
-
-/* ---------------- USER MARKER ---------------- */
-const userIcon = L.marker([0, 0], {
+/* ---------------- MARKER ---------------- */
+const userMarker = L.marker([0,0], {
     icon: L.divIcon({
         html: "⬤",
         className: "",
-        iconSize: [15, 15],
-        iconAnchor: [7, 7]
+        iconSize: [15,15],
+        iconAnchor: [7,7]
     })
 }).addTo(map);
 
-/* ---------------- HELPERS ---------------- */
-function normalizeHeading(h) {
-    return Math.abs(h) < 1 ? 0 : h;
-}
+/* ---------------- CORE STATE ---------------- */
+let followMode = true;
 
-/* ---------------- GEO TRACKING ---------------- */
-navigator.geolocation.watchPosition(
-    (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        const heading = pos.coords.heading !== null ? pos.coords.heading : lastHeading;
-        lastHeading = heading;
+/* ---------------- FOLLOW MODE BUTTON ---------------- */
+document.getElementById("follow-btn").onclick = () => {
+    followMode = !followMode;
+    document.getElementById("follow-btn").innerText = `FOLLOW: ${followMode ? "ON" : "OFF"}`;
+};
 
-        userIcon.setLatLng([lat, lng]);
-
-        // Only rotate if map is in follow mode AND user is not rotating manually
-        if (followMode && !userRotating) {
-            map.setBearing(normalizeHeading(heading), { animate: true, duration: 250 });
-        }
-
-        // Follow position only when in follow mode
-        if (followMode) {
-            map.setView([lat, lng], map.getZoom(), { animate: true });
-        }
-    },
-    (err) => console.log("GPS ERROR:", err),
-    { enableHighAccuracy: true }
-);
-
-/* ---------------- USER INTERACTION ---------------- */
+/* ---------------- STOP FOLLOW IF USER MOVES MAP ---------------- */
 map.on("mousedown touchstart", () => {
     followMode = false;
     document.getElementById("follow-btn").innerText = "FOLLOW: OFF";
 });
 
-// when user manually rotates map
-map.on("rotatestart", () => {
-    userRotating = true;
-});
+/* ---------------- GPS TRACKING ---------------- */
+navigator.geolocation.watchPosition(
+    (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const heading = pos.coords.heading;
 
-// allow small pause before GPS is allowed to rotate again
-map.on("rotateend", () => {
-    setTimeout(() => userRotating = false, 700);
-});
+        userMarker.setLatLng([lat, lng]);
 
-/* ---------------- BUTTONS ---------------- */
-document.getElementById("follow-btn").onclick = () => {
-    followMode = !followMode;
-    document.getElementById("follow-btn").innerText =
-        `FOLLOW: ${followMode ? "ON" : "OFF"}`;
-};
+        // Let plugin handle rotation—only apply heading when following
+        if (followMode && heading !== null) {
+            map.setBearing(heading, { animate: true });
+        }
 
-document.getElementById("compass-btn").onclick = () => {
-    map.setBearing(0, { animate: true, duration: 300 });
-};
+        if (followMode) {
+            map.setView([lat, lng], map.getZoom(), { animate: true });
+        }
+    },
+    () => console.log("GPS Error"),
+    { enableHighAccuracy: true }
+);
+
+/* ---------------- ENABLE DEBUG (LIKE OFFICIAL) ---------------- */
+L.Rotate.debug(map);
+
 </script>
 </body>
 </html>

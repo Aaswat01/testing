@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Leaflet Rotate Navigation</title>
+    <title>17th</title>
 
     <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -25,7 +25,9 @@
             cursor: pointer;
             box-shadow: 0 3px 10px rgba(0,0,0,0.3);
             z-index: 9999;
+            font-size: 20px;
         }
+
         #follow-btn {
             position: absolute;
             bottom: 15px;
@@ -48,84 +50,90 @@
 <div id="follow-btn">FOLLOW: ON</div>
 
 <script>
-/* ---------------- MAP CORE ---------------- */
+/* ---------------- MAP SETUP ---------------- */
 const map = L.map("map", {
     center: [20.5937, 78.9629],
-    zoom: 17,
+    zoom: 18,
     rotate: true,
     touchRotate: true,
-    compassBearing: false, // must stay off to avoid interference
+    compassBearing: false, // prevents auto rotation overrides
 });
 
 /* ---------------- TILE LAYER ---------------- */
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 23
+    maxZoom: 22
 }).addTo(map);
 
-/* ---------------- STATE ---------------- */
+/* ---------------- VARIABLES ---------------- */
 let followMode = true;
-let lastHeading = 0;
 let userRotating = false;
+let lastHeading = 0;
 
-/* ---------------- CAR MARKER ---------------- */
-const userIcon = L.circleMarker([0,0], {
-    radius: 8,
-    color: "#ff4747",
-    fillColor: "#ff6a6a",
-    fillOpacity: 1
+/* ---------------- USER MARKER ---------------- */
+const userIcon = L.marker([0, 0], {
+    icon: L.divIcon({
+        html: "⬤",
+        className: "",
+        iconSize: [15, 15],
+        iconAnchor: [7, 7]
+    })
 }).addTo(map);
 
-/* ---------------- BUTTONS ---------------- */
-document.getElementById("follow-btn").onclick = () => {
-    followMode = !followMode;
-    document.getElementById("follow-btn").innerText = `FOLLOW: ${followMode ? "ON" : "OFF"}`;
-};
+/* ---------------- HELPERS ---------------- */
+function normalizeHeading(h) {
+    return Math.abs(h) < 1 ? 0 : h;
+}
 
-document.getElementById("compass-btn").onclick = () => {
-    map.setBearing(0, { animate: true, duration: 300 });
-};
+/* ---------------- GEO TRACKING ---------------- */
+navigator.geolocation.watchPosition(
+    (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const heading = pos.coords.heading !== null ? pos.coords.heading : lastHeading;
+        lastHeading = heading;
 
-/* ---------------- STOP FOLLOW WHEN USER TOUCHES ---------------- */
+        userIcon.setLatLng([lat, lng]);
+
+        // Only rotate if map is in follow mode AND user is not rotating manually
+        if (followMode && !userRotating) {
+            map.setBearing(normalizeHeading(heading), { animate: true, duration: 250 });
+        }
+
+        // Follow position only when in follow mode
+        if (followMode) {
+            map.setView([lat, lng], map.getZoom(), { animate: true });
+        }
+    },
+    (err) => console.log("GPS ERROR:", err),
+    { enableHighAccuracy: true }
+);
+
+/* ---------------- USER INTERACTION ---------------- */
 map.on("mousedown touchstart", () => {
     followMode = false;
     document.getElementById("follow-btn").innerText = "FOLLOW: OFF";
 });
 
-/* ---------------- USER ROTATION HANDLING ---------------- */
-map.on("rotatestart", () => { userRotating = true; });
-map.on("rotateend", () => {
-    setTimeout(() => userRotating = false, 800);
+// when user manually rotates map
+map.on("rotatestart", () => {
+    userRotating = true;
 });
 
-/* ---------------- SNAP-TO-NORTH HELPER ---------------- */
-function normalizeBearing(br) {
-    return Math.abs(br) < 1 ? 0 : br;
-}
+// allow small pause before GPS is allowed to rotate again
+map.on("rotateend", () => {
+    setTimeout(() => userRotating = false, 700);
+});
 
-/* ---------------- GPS LOGIC ---------------- */
-if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(pos => {
+/* ---------------- BUTTONS ---------------- */
+document.getElementById("follow-btn").onclick = () => {
+    followMode = !followMode;
+    document.getElementById("follow-btn").innerText =
+        `FOLLOW: ${followMode ? "ON" : "OFF"}`;
+};
 
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        const heading = pos.coords.heading ?? lastHeading;
-        lastHeading = heading;
-
-        // update position
-        userIcon.setLatLng([lat, lng]);
-
-        // Only rotate if: follow mode ON + user NOT rotating manually
-        if (followMode && !userRotating) {
-            map.setBearing(normalizeBearing(heading), { animate: true, duration: 250 });
-        }
-
-        // Auto-center only if follow mode ON
-        if (followMode) {
-            map.panTo([lat, lng], { animate: true });
-        }
-
-    }, console.warn, { enableHighAccuracy: true });
-}
+document.getElementById("compass-btn").onclick = () => {
+    map.setBearing(0, { animate: true, duration: 300 });
+};
 </script>
 </body>
 </html>

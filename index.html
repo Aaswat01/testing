@@ -952,7 +952,8 @@ function updateVirtualGPS(latlng) {
 }
 /* ---------------- ROTATION CONTROL ---------------- */
 let follow = true;
-let autoRotation = true;
+let autoRotation = false;  // rotation OFF by default
+let userHasTouchedMap = false;
 let lastHeading = 0;
 
 // Stop auto rotate when user moves map
@@ -960,6 +961,7 @@ map.on("mousedown touchstart", () => {
     follow = false;
     autoRotation = false;
     autoCenter = false;
+    userHasTouchedMap = true;
     lastUserInteraction = Date.now();
 });
 
@@ -968,18 +970,6 @@ map.on("mousedown touchstart", () => {
 map.on("dragend zoomend rotateend", () => {
     lastUserInteraction = Date.now();
 });
-setInterval(() => {
-    if (!follow && Date.now() - lastUserInteraction > 60000) {
-        follow = true;
-        autoCenter = true;
-        autoRotation = true;
-
-        if (userMarker) {
-            map.flyTo(userMarker.getLatLng(), 18, { animate: true, duration: 1.2 });
-        }
-    }
-}, 3000);
-
 // Modify GPS watcher to detect permission denial
 if (navigator.geolocation){
   navigator.geolocation.watchPosition(async pos=>{
@@ -1003,14 +993,15 @@ if (navigator.geolocation){
     }
 
     // 🆕 Only follow when follow mode is active
-    if (follow && autoCenter) {
+    // Only center if user did NOT interact manually
+    if (follow && !userHasTouchedMap) {
         map.panTo(latlng, { animate: true });
     }
 
-    if (follow && autoRotation && heading !== null) {
+    // Only rotate if autoRotation is enabled manually
+    if (autoRotation && heading !== null) {
         map.setBearing(heading, { animate: true, duration: 300 });
     }
-
 
     await adaptiveAIDashboard(latlng, heading);
     smartStepAdvancement(latlng);
@@ -2048,18 +2039,25 @@ document.getElementById("map-toggle").addEventListener("click",()=>{
   }
 });
 document.getElementById("locate-btn").onclick = () => {
-    if (!userMarker) return;
     follow = true;
     autoCenter = true;
-    autoRotation = true;
-    map.flyTo(userMarker.getLatLng(), 19, { animate: true, duration: 0.9 });
+    userHasTouchedMap = false; 
+    // NOTE: Do NOT enable autoRotation here.
+    map.flyTo(userMarker.getLatLng(), 19, { animate:true, duration:0.9 });
 };
 
 document.getElementById("compass-btn").onclick = () => {
-    autoRotation = true;
-    follow = true;
+    autoRotation = false;  // stop device-based rotation
+    follow = true;          // only re-center, not rotate
+    userHasTouchedMap = false;
+
     map.setBearing(0, { animate:true, duration:300 });
+
+    const btn = document.getElementById("compass-btn");
+    btn.style.background = "#00b36b";
+    setTimeout(() => btn.style.background = "#1e90ff", 600);
 };
+
 // ===== Search =====
 const input = document.getElementById("searchInput");
 const suggestBox = document.getElementById("suggestBox");

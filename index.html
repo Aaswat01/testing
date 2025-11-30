@@ -9,23 +9,41 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{
-background:radial-gradient(circle at top left,#2a4b7a,#1c2b44,#2a3b60);
+background:radial-gradient(circle at top left,#2a4b7a,#1c3444,#2a3b60);
 font-family:"Segoe UI",Arial,sans-serif;color:#fff;
 height:100vh;display:flex;flex-direction:column;overflow:hidden;
 }
 /* === HEADER === */
 .ai-tip-box{flex:0 0 auto;background:#ffa500;color:#000;border-radius:1vh;
-margin:1vh 2vw;padding:1.5vh 1vw;text-align:center;font-weight:bold;
+margin:0.4vh 2vw;padding:1.5vh 1vw;text-align:center;font-weight:bold;
 font-size:clamp(1rem,2vw,1.6rem);box-shadow:0 0.5vh 1vh rgba(0,0,0,0.4);}
-.stats-row {display: grid;grid-template-columns: repeat(4, 1fr);gap: 8px;padding: 10px 14px;width: 100%;}
-@media (max-width: 480px) {
-  .stats-row {
-    grid-template-columns: repeat(2, 1fr);
-  }
+/* ==== FIXED 2×2 Stats Layout ==== */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 0; /* no spacing between boxes */
+  width: 100%;
+  padding: 1px 2px;
 }
-.stat-card {background: rgba(28,34,48,0.95);border-radius: 10px;padding: 10px;text-align: center;border: 1px solid rgba(255,255,255,0.2);}
-.stat-label{font-size:0.9rem;opacity:0.8;}
-.stat-value{font-size:1.3rem;font-weight:bold;margin-top:0.3rem;}
+
+/* All boxes same small size */
+.stat-card {
+  background: rgba(28,34,48,0.95);
+  border: 1px solid rgba(255,255,255,0.18);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  padding: 6px 4px;
+  border-radius: 6px;
+  height: 50px; /* fixed small height */
+}
+/* Text sizes optimized */
+.stat-label {font-size: 0.75rem;opacity: 0.7;margin-bottom: 2px;
+}
+.stat-value {font-size: 1.15rem;font-weight: bold;
+}
 .speed-box{background:#4e79a7;}
 .gear-box{background:#76b7b2;color:#000;}
 .throttle-box{background:#2ca02c;color:#000;}
@@ -33,18 +51,18 @@ font-size:clamp(1rem,2vw,1.6rem);box-shadow:0 0.5vh 1vh rgba(0,0,0,0.4);}
 #searchContainer {
   position:absolute;
   top: 14px;
-  left:43%;
+  left:50%;
   transform:translateX(-50%);
-  width: min(82vw, 520px);
+  width: min(100vw, 520px);
   padding: 10px 16px;
   display:flex;
   align-items:center;
-  gap:10px;
+  gap:6px;
   background: #ffffffdd;
   backdrop-filter: blur(12px);
   border-radius: 50px;
   box-shadow: 0 6px 18px rgba(0,0,0,0.3);
-  z-index:5000;
+  z-index:4000;
 }
 #searchInput {
   flex: 1;
@@ -111,7 +129,7 @@ font-weight:bold;cursor:pointer;box-shadow:0 0.4vh 1vh rgba(0,0,0,0.3);}
   position: absolute;
   bottom: 13vh;
   right: 1vh;
-  z-index: 1000;
+  z-index: 4000;
   background: #08ee55;
   color: #e61111;
   border: none;
@@ -126,11 +144,12 @@ font-weight:bold;cursor:pointer;box-shadow:0 0.4vh 1vh rgba(0,0,0,0.3);}
   justify-content: center;
   align-items: center;
   transition: transform 0.2s ease, background 0.3s ease;
+  pointer-events: auto;
 }
 #locate-btn:hover {background: #4682b4;transform: scale(1.1);}
 
-#map-toggle{position:absolute;top:1vh;right:1vh;z-index:1000;background:#ff8c00;
-border:none;border-radius:1vh;padding:0.5vh 1vw;font-weight:bold;cursor:pointer;color:#000;}
+#map-toggle{position:absolute;top:50vh;right:0vh;z-index:1000;background:#ff8c00 ;
+border:none;border-radius:1vh;padding:0.4vh 5vw;font-weight:bold;cursor:pointer;color:#000;pointer-events: auto;}
 /* === ROUTE PANEL === */
 #routePanel{position:absolute;bottom:2vh;left:2vw;width:270px;max-height:42vh;
 overflow-y:auto;background:rgba(0,0,0,0.6);border-radius:1vh;padding:0.5vh;color:#fff;z-index:999;}
@@ -541,15 +560,14 @@ align-items:center;color:#fff;font-size:0.9rem;}
     <div id="searchContainer" class="search-row">
       <button id="routePanelBtn"
           style="background:#00b36b;color:#fff;border:none;border-radius:1vh;
-          padding:0.8vh 1vw;font-weight:bold;font-size:1.2rem;cursor:pointer;">
-          ＋
+          padding:0.1vh 2vw;font-weight:bold;font-size:1.2rem;cursor:pointer;">＋
       </button>
-      <input type="text" id="searchInput" placeholder="Search destination...">
       <button id="micBtn">🎤</button>
       <button id="mapSelectBtn" 
       style="background:#ffcc00;color:#000;border:none;border-radius:1vh;
-      padding:0.8vh 1.2vw;font-weight:bold;cursor:pointer;box-shadow:0 0.4vh 1vh rgba(0,0,0,0.3);"> Select
+      padding:1.3vh 1.2vw;font-weight:bold;cursor:pointer;box-shadow:0 0.4vh 1vh rgba(0,0,0,0.3);"> Select
       </button>
+      <input type="text" id="searchInput" placeholder="Search destination...">
       <button id="clearSearchBtn" 
       style="
         position: absolute; 
@@ -567,15 +585,15 @@ align-items:center;color:#fff;font-size:0.9rem;}
       <div id="suggestBox" class="universal-suggest-box"></div>
     </div>
     <div id="map" class="map"></div>
-    <button id="map-toggle">Full Map</button>
+    <button id="map-toggle">Full</button>
     <button id="locate-btn" title="Recenter to my location">🎯</button>
     <button id="compass-btn" style="
       position: absolute;
-      top: 35px;
-      right: 15px;
+      top: 430px;
+      right: 10px;
       z-index: 3000;
-      background:#1e90ff;
-      color:white;
+      background:#ff1212;
+      color:rgb(28, 255, 24);
       border:none;
       border-radius:50%;
       width:42px;
@@ -583,10 +601,9 @@ align-items:center;color:#fff;font-size:0.9rem;}
       font-size:1.2rem;
       font-weight:bold;
       cursor:pointer;
-      box-shadow:0 0.4vh 1vh rgba(0,0,0,0.4);
+      box-shadow:0 0.4vh 1vh rgba(121, 11, 255, 0.4);
       transition: 0.2s;
-    ">🧭</button>
-
+    ">⬆️</button>
     <div id="routePanel"></div>
     <div id="approvalPanel" aria-live="polite">
       <div class="approval-row">
@@ -667,7 +684,7 @@ mapSelectBtn.onclick = () => {
     if (mapClickEnabled) {
         mapSelectBtn.style.background = "#00b36b";
         mapSelectBtn.style.color = "#fff";
-        mapSelectBtn.textContent = "✔ Tap";
+        mapSelectBtn.textContent = "Tap";
     } else {
         mapSelectBtn.style.background = "#ffcc00";
         mapSelectBtn.style.color = "#000";
@@ -2045,17 +2062,24 @@ document.getElementById("locate-btn").onclick = () => {
     // NOTE: Do NOT enable autoRotation here.
     map.flyTo(userMarker.getLatLng(), 19, { animate:true, duration:0.9 });
 };
-
 document.getElementById("compass-btn").onclick = () => {
-    autoRotation = false;  // stop device-based rotation
-    follow = true;          // only re-center, not rotate
-    userHasTouchedMap = false;
 
-    map.setBearing(0, { animate:true, duration:300 });
+    // Stop all automatic behavior
+    follow = true;
+    autoRotation = false;
+    userHasTouchedMap = true;
+    autoCenter = false;
 
+    // Hard reset rotation & car icon alignment
+    map.setBearing(0, { animate: true, duration: 250 });
+
+    const svg = document.getElementById("user-car-svg");
+    if (svg) svg.style.transform = "rotate(0deg)";  // car icon straight
+
+    // Button feedback
     const btn = document.getElementById("compass-btn");
     btn.style.background = "#00b36b";
-    setTimeout(() => btn.style.background = "#1e90ff", 600);
+    setTimeout(() => btn.style.background = "#1e90ff", 500);
 };
 
 // ===== Search =====

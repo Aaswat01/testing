@@ -15,16 +15,13 @@ height:100vh;display:flex;flex-direction:column;overflow:hidden;
 }
 /* === HEADER === */
 .ai-tip-box{flex:0 0 auto;background:#ffa500;color:#000;border-radius:1vh;
-margin:0.4vh 2vw;padding:1.5vh 1vw;text-align:center;font-weight:bold;
+margin:0.4vh 2vw;padding:1.5vh 3vw;text-align:center;font-weight:bold;
 font-size:clamp(1rem,2vw,1.6rem);box-shadow:0 0.5vh 1vh rgba(0,0,0,0.4);}
 /* ==== FIXED 2×2 Stats Layout ==== */
 .stats-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(2, 1fr);
-  gap: 0; /* no spacing between boxes */
+  display: flex;
+  justify-content: space-between;
   width: 100%;
-  padding: 1px 2px;
 }
 
 /* All boxes same small size */
@@ -32,12 +29,13 @@ font-size:clamp(1rem,2vw,1.6rem);box-shadow:0 0.5vh 1vh rgba(0,0,0,0.4);}
   background: rgba(28,34,48,0.95);
   border: 1px solid rgba(255,255,255,0.18);
   display: flex;
+  flex: 1;
   flex-direction: column;
   justify-content: center;
   text-align: center;
   padding: 6px 4px;
   border-radius: 6px;
-  height: 50px; /* fixed small height */
+  height: 55px; /* fixed small height */
 }
 /* Text sizes optimized */
 .stat-label {font-size: 0.75rem;opacity: 0.7;margin-bottom: 2px;
@@ -50,17 +48,17 @@ font-size:clamp(1rem,2vw,1.6rem);box-shadow:0 0.5vh 1vh rgba(0,0,0,0.4);}
 /* === SEARCH === */
 #searchContainer {
   position:absolute;
-  top: 14px;
+  top: 1px;
   left:50%;
   transform:translateX(-50%);
   width: min(100vw, 520px);
-  padding: 10px 16px;
+  padding: 13px 16px;
   display:flex;
   align-items:center;
   gap:6px;
   background: #ffffffdd;
   backdrop-filter: blur(12px);
-  border-radius: 50px;
+  border-radius: 20px;
   box-shadow: 0 6px 18px rgba(0,0,0,0.3);
   z-index:4000;
 }
@@ -115,20 +113,20 @@ font-weight:bold;cursor:pointer;box-shadow:0 0.4vh 1vh rgba(0,0,0,0.3);}
   font-size: 0.8rem;
 }
 /* === MAIN (Map now fills space) === */
-.main-section{flex:1;display:flex;flex-direction:column;gap:1vh;padding:0 1vw 1vh;}
+.main-section{flex:1;display:fixed;flex-direction:column;padding:0 1vw 1vh;}
 .map-container {
-  position:relative;
-  flex:1;
-  border-radius:16px;
-  overflow:hidden;
+  position: relative;
+  width: 100%;
+  height: 100vh; /* Full height */
+  padding-bottom: 90px; /* leave space for UI controls */
+  box-sizing: border-box;
 }
-
-.map{width:100%;height:100%;}
+.map{width:100%;height:90%;}
 /* === Locate (Target) Button === */
 #locate-btn {
   position: absolute;
-  bottom: 13vh;
-  right: 1vh;
+  bottom: 60vh;
+  right: 37vh;
   z-index: 4000;
   background: #08ee55;
   color: #e61111;
@@ -148,21 +146,33 @@ font-weight:bold;cursor:pointer;box-shadow:0 0.4vh 1vh rgba(0,0,0,0.3);}
 }
 #locate-btn:hover {background: #4682b4;transform: scale(1.1);}
 
-#map-toggle{position:absolute;top:50vh;right:0vh;z-index:1000;background:#ff8c00 ;
+#map-toggle{position:absolute;top:10vh;right:32vh;z-index:1000;background:#ff8c00 ;
 border:none;border-radius:1vh;padding:0.4vh 5vw;font-weight:bold;cursor:pointer;color:#000;pointer-events: auto;}
 /* === ROUTE PANEL === */
-#routePanel{position:absolute;bottom:2vh;left:2vw;width:270px;max-height:42vh;
-overflow-y:auto;background:rgba(0,0,0,0.6);border-radius:1vh;padding:0.5vh;color:#fff;z-index:999;}
+#routePanel {
+  position: absolute;
+  bottom: 20vh; /* lifted above bottom UI elements */
+  left: 2vw;
+  width: 270px;
+  max-height: 48vh; /* more height and scrollable */
+  overflow-y: auto;
+  background: rgba(0,0,0,0.7);
+  border-radius: 12px;
+  padding: 8px;
+  color: #fff;
+  z-index: 9999;
+  transition: bottom .3s ease;
+}
+
 .route-box{margin-bottom:0.8vh;border-radius:1vh;overflow:hidden;background:rgba(255,255,255,0.05);backdrop-filter:blur(6px);box-shadow:0 0.4vh 1vh rgba(0,0,0,0.5);}
 .route-header{padding:0.6vh 0.6vw;font-weight:bold;display:flex;justify-content:space-between;
 align-items:center;color:#fff;font-size:0.9rem;}
-.route-content{background:rgba(255,255,255,0.1);padding:0.4vh 0.6vw;font-size:0.85rem;max-height:30vh;overflow-y:auto;transition:all 0.3s ease;}
+.route-content{background:rgba(255,255,255,0.1);padding:0.4vh 0.6vw;font-size:0.85rem;max-height:100vh;overflow-y:auto;transition:all 0.3s ease;}
 .route-step{padding:0.4vh 0.3vw;margin-bottom:0.4vh;border-bottom:1px solid rgba(255,255,255,0.1);transition:all 0.3s ease;}
 .route-step:hover{background:rgba(255,255,255,0.15);}
 .route-step.completed{display:none;} /* 🆕 HIDE completed steps */
 .route-step.active{background:rgba(255,215,0,0.3);font-weight:bold;border-left:3px solid gold;}
 .route-step.upcoming{opacity:0.7;}
-
 /* Car Icon Style */
 .user-car-icon {
     width: 32px;
@@ -173,25 +183,32 @@ align-items:center;color:#fff;font-size:0.9rem;}
 }
 .user-car-svg {
     transform-origin: center;
-    transition: transform 0.3s linear;
+    transition: none !important;
+    transform: rotate(0deg) !important;
 }
 /* === Slide-up Approval Panel === */
-#approvalPanel{
-  position:absolute;
-  left:50%;
-  bottom:1.5vh;
-  transform:translate(-50%, 130%);
-  width:min(92vw,460px);
-  background:rgba(20,24,36,0.96);
-  border:1px solid rgba(255,255,255,0.15);
-  border-radius:14px;
-  box-shadow:0 0.8vh 2vh rgba(0,0,0,0.5);
-  padding:12px 14px;
-  z-index:1100;
-  transition:transform .28s ease;
-  backdrop-filter:blur(6px);
+#approvalPanel {
+  position: absolute;
+  left: 50%;
+  bottom: 160px; /* <-- moves it up above bottom bar */
+  transform: translateX(-50%) translateY(60px);
+  width: min(92vw, 460px);
+  background: rgba(20,24,36,0.96);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 14px;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+  padding: 14px;
+  z-index: 6000;
+  transition: all 0.28s ease;
+  opacity: 0;
+  pointer-events: none;
 }
-#approvalPanel.show{ transform:translate(-50%, 0); }
+
+#approvalPanel.show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
 
 .approval-row{ display:flex; gap:10px; align-items:center; }
 .approval-icon{
@@ -488,7 +505,7 @@ align-items:center;color:#fff;font-size:0.9rem;}
   <div class="stat-card speed-box"><div class="stat-label">Speed</div><div class="stat-value" id="speed">0 km/h</div></div>
   <div class="stat-card gear-box"><div class="stat-label">Gear</div><div class="stat-value" id="gear">N</div></div>
   <div class="stat-card throttle-box"><div class="stat-label">Throttle</div><div class="stat-value" id="throttle">0%</div></div>
-  <div class="stat-card" style="background:#d9534f;"><div class="stat-label">Speed Limit</div><div class="stat-value" id="speedLimit">-- km/h</div>
+  <div class="stat-card" style="background:#d9534f;"><div class="stat-label">Speed Limit</div><div class="stat-value" id="speedLimit">-km/h</div>
 </div>
 
 </div>
@@ -585,12 +602,11 @@ align-items:center;color:#fff;font-size:0.9rem;}
       <div id="suggestBox" class="universal-suggest-box"></div>
     </div>
     <div id="map" class="map"></div>
-    <button id="map-toggle">Full</button>
-    <button id="locate-btn" title="Recenter to my location">🎯</button>
+    <button id="map-toggle">Full Map</button>
     <button id="compass-btn" style="
       position: absolute;
-      top: 430px;
-      right: 10px;
+      top: 110px;
+      right: 300px;
       z-index: 3000;
       background:#ff1212;
       color:rgb(28, 255, 24);
@@ -604,6 +620,7 @@ align-items:center;color:#fff;font-size:0.9rem;}
       box-shadow:0 0.4vh 1vh rgba(121, 11, 255, 0.4);
       transition: 0.2s;
     ">⬆️</button>
+    <button id="locate-btn" title="Recenter to my location">🎯</button>
     <div id="routePanel"></div>
     <div id="approvalPanel" aria-live="polite">
       <div class="approval-row">
@@ -661,11 +678,7 @@ L.control.layers(
   null, { position: "bottomright", collapsed: true }
 ).addTo(map);
 
-const carIcon = L.divIcon({
-  className: 'user-car-icon',
-  html: '<svg id="user-car-svg" class="user-car-svg" width="32" height="32" viewBox="0 0 100 100" fill="#2a3b60" stroke="#fff" stroke-width="3"><path d="M 25 20 L 75 20 L 80 45 L 90 45 L 90 70 L 10 70 L 10 45 L 20 45 Z" /></svg>',
-  iconSize: [32,32], iconAnchor: [16,16]
-});
+const carIcon=L.icon({iconUrl:'https://cdn-icons-png.flaticon.com/512/3097/3097144.png',iconSize:[42,42]});
 const slidePanel = document.getElementById("slideRoutePanel");
 
 document.getElementById("routePanelBtn").onclick = () => {
@@ -1557,6 +1570,20 @@ if (navigator.geolocation){
     } else {
         userMarker.setLatLng(latlng);
     }
+    // AUTO FOLLOW AND ROTATE BASED ON HEADING
+    const speedThreshold = 4; // km/h
+
+    if (pos.coords.speed * 3.6 > speedThreshold) {
+        // Real heading from GPS if available
+        if (heading !== null && heading !== 0) {
+            autoRotation = true;
+            map.setBearing(heading, { animate: true, duration: 400 });
+
+            // Rotate car marker to match heading
+            const carSvg = document.getElementById("user-car-svg");
+            if (carSvg) carSvg.style.transform = `rotate(${heading}deg)`;
+        }
+    }
 
     // Auto-center only if enabled
     if (autoCenter) {
@@ -1567,15 +1594,23 @@ if (navigator.geolocation){
     if (!autoRotation && Date.now() - lastManualRotation > manualRotationTimeout && currentSpeed > 3) {
         autoRotation = true;
     }
-    const compassBtn = document.getElementById("compass-btn");
+    document.getElementById("compass-btn").onclick = () => {
+        autoRotation = false;
+        follow = true; 
+        autoCenter = true;
 
-    compassBtn.onclick = () => {
-        autoRotation = true;
-        rotateMap(0); // Reset to north
-        compassBtn.style.background = "#00b300";
-        setTimeout(() => compassBtn.style.background = "#1e90ff", 600);
+        // Reset map rotation
+        map.setBearing(0, { animate: true, duration: 400 });
+
+        // Reset car icon rotation
+        const carEl = document.getElementById("user-car-svg");
+        if (carEl) carEl.style.transform = "rotate(0deg)";
+
+        // Visual feedback
+        const btn = document.getElementById("compass-btn");
+        btn.style.background = "#00b36b";
+        setTimeout(() => btn.style.background = "#ff1212", 500);
     };
-
     await adaptiveAIDashboard(latlng, heading);
   }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
@@ -2074,7 +2109,7 @@ document.getElementById("compass-btn").onclick = () => {
     map.setBearing(0, { animate: true, duration: 250 });
 
     const svg = document.getElementById("user-car-svg");
-    if (svg) svg.style.transform = "rotate(0deg)";  // car icon straight
+    if (svg) svg.style.transform = "rotate(0deg) !important";  // car icon straight
 
     // Button feedback
     const btn = document.getElementById("compass-btn");
@@ -2355,52 +2390,130 @@ function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
 function deg2rad(deg) {
   return deg * (Math.PI / 180);
 }
-
 async function getSearchResults(query) {
 
     const center = userMarker ? userMarker.getLatLng() : map.getCenter();
     const encoded = encodeURIComponent(query);
 
-    const SEARCH_RADIUS_KM = 50;   // max allowed radius
+    const SEARCH_RADIUS_KM = 50;
     const RESULT_LIMIT = 15;
 
     let results = [];
 
-    // ---- SOURCE 1: Photon (Proximity sorted automatically) ----
-    try {
-        const url = `https://photon.komoot.io/api/?q=${encoded}&lat=${center.lat}&lon=${center.lng}&limit=20`;
-        const res = await fetch(url);
-        const json = await res.json();
+    // --- Determine search category ---
+    const containsForeignChars = /[^\u0000-\u007F]/.test(query);
+    const isCoordinateFormat = /(-?\d+(\.\d+)?),\s*(-?\d+(\.\d+)?)/.test(query);
 
-        json.features?.forEach(f => {
-            results.push({
-                name: f.properties.name || "",
-                display_name: f.properties.name + ", " + (f.properties.city || "") + ", " + (f.properties.country || ""),
-                lat: f.geometry.coordinates[1],
-                lon: f.geometry.coordinates[0],
-                distanceKm: getDistanceFromLatLonInKm(center.lat, center.lng, f.geometry.coordinates[1], f.geometry.coordinates[0])
+    // Keywords to detect countries / world cities automatically (no fixed categories — heuristic)
+    const globalHint = ["country", "city", "capital", "airport", "border", "state"];
+    const isExplicitGlobal = globalHint.some(w => query.toLowerCase().includes(w));
+
+    const isLongName = query.length >= 6;
+    const isGlobalQuery = containsForeignChars || isExplicitGlobal || isLongName;
+
+    // --- Direct coordinate search (highest priority) ---
+    if (isCoordinateFormat) {
+        const [lat, lon] = query.split(",").map(Number);
+        return [{
+            name: `Pinned location`,
+            display_name: `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
+            lat, lon,
+            distanceKm: getDistanceFromLatLonInKm(center.lat, center.lng, lat, lon),
+            score: 9999,
+            isCoordinate: true
+        }];
+    }
+
+    // ---- API calls ----
+    const sources = [
+        fetch(`https://photon.komoot.io/api/?q=${encoded}&lat=${center.lat}&lon=${center.lng}&limit=20`).then(r => r.json()).catch(() => null),
+        fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encoded}&limit=20&accept-language=en`).then(r => r.json()).catch(() => null),
+        fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encoded}&limit=20&accept-language=auto`).then(r => r.json()).catch(() => null),
+        fetch(`https://en.wikipedia.org/w/api.php?action=query&prop=coordinates&format=json&origin=*&list=search&srsearch=${encoded}`).then(r => r.json()).catch(() => null)
+    ];
+
+    const responses = await Promise.allSettled(sources);
+
+    // ---- Parse results ----
+    for (const r of responses) {
+        if (r.status !== "fulfilled" || !r.value) continue;
+
+        // Photon
+        if (r.value.features) {
+            r.value.features.forEach(f => {
+                results.push({
+                    name: f.properties.name || "",
+                    display_name: `${f.properties.name}, ${f.properties.city || ""}, ${f.properties.state || ""}, ${f.properties.country || ""}`,
+                    lat: f.geometry.coordinates[1],
+                    lon: f.geometry.coordinates[0],
+                    source: "photon",
+                    score: 2
+                });
             });
-        });
-    } catch {}
+        }
 
-    // ---- SOURCE 2: Nominatim (backup) ----
-    try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encoded}&limit=20&accept-language=en`;
-        const res = await fetch(url);
-        const json = await res.json();
-
-        json.forEach(f => {
-            results.push({
-                name: f.display_name.split(",")[0],
-                display_name: f.display_name,
-                lat: parseFloat(f.lat),
-                lon: parseFloat(f.lon),
-                distanceKm: getDistanceFromLatLonInKm(center.lat, center.lng, parseFloat(f.lat), parseFloat(f.lon))
+        // Nominatim
+        if (Array.isArray(r.value)) {
+            r.value.forEach(f => {
+                results.push({
+                    name: f.display_name.split(",")[0],
+                    display_name: f.display_name,
+                    lat: parseFloat(f.lat),
+                    lon: parseFloat(f.lon),
+                    source: "nominatim",
+                    score: 5
+                });
             });
-        });
-    } catch {}
+        }
 
-    // --- DEDUPLICATE BASED ON COORDS ---
+        // Wikipedia (with coordinates)
+        if (r.value?.query?.search) {
+            for (const item of r.value.query.search) {
+                const title = item.title;
+
+                const coordsReq = await fetch(`https://en.wikipedia.org/w/api.php?action=query&prop=coordinates&format=json&origin=*&titles=${title}`);
+                const coordJson = await coordsReq.json();
+
+                const key = Object.keys(coordJson.query.pages)[0];
+                const coords = coordJson.query.pages[key]?.coordinates?.[0];
+
+                if (coords) {
+                    results.push({
+                        name: title,
+                        display_name: `${title} (Wikipedia)`,
+                        lat: coords.lat,
+                        lon: coords.lon,
+                        source: "wikipedia",
+                        score: 7
+                    });
+                }
+            }
+        }
+    }
+
+    // ---- Compute distances ----
+    results.forEach(r => {
+        r.distanceKm = getDistanceFromLatLonInKm(center.lat, center.lng, r.lat, r.lon);
+    });
+
+    // ---- NLP similarity scoring ----
+    const normalize = t => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const normQuery = normalize(query);
+
+    results.forEach(r => {
+        const nTitle = normalize(r.name);
+        const nFull = normalize(r.display_name);
+
+        if (nTitle === normQuery) r.score += 20;
+        if (nFull.includes(normQuery)) r.score += 10;
+        if (nTitle.startsWith(normQuery)) r.score += 7;
+
+        // special: if it's near user → boost for local
+        if (r.distanceKm < 5) r.score += 10;
+        if (r.distanceKm < 1) r.score += 20;
+    });
+
+    // ---- Deduplicate by coordinate ----
     const seen = new Set();
     results = results.filter(r => {
         const key = `${r.lat.toFixed(4)},${r.lon.toFixed(4)}`;
@@ -2409,18 +2522,27 @@ async function getSearchResults(query) {
         return true;
     });
 
-    // --- HARD FILTER: ONLY NEAR RESULTS ---
-    results = results.filter(r => r.distanceKm <= SEARCH_RADIUS_KM);
+    // ---- Local / Global behavior ----
+    const localResults = results.filter(r => r.distanceKm <= SEARCH_RADIUS_KM);
+    const globalResults = results.filter(r => r.distanceKm > SEARCH_RADIUS_KM);
 
-    // If NOTHING within radius → fallback to nearest 5 (NOT global)
-    if (results.length === 0) {
-        results = results.sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 5);
+    let final;
+
+    if (isGlobalQuery && globalResults.length > 0) {
+        // Query clearly global → show exact foreign result first
+        final = [...globalResults, ...localResults];
+    } else if (localResults.length > 0) {
+        // Local intent → only nearby
+        final = localResults;
+    } else {
+        // Fallback if nothing local
+        final = results;
     }
 
-    // --- SORT STRICTLY BY NEAREST DISTANCE ---
-    results.sort((a, b) => a.distanceKm - b.distanceKm);
+    // ---- Final Sort ----
+    final.sort((a, b) => b.score - a.score || a.distanceKm - b.distanceKm);
 
-    return results.slice(0, RESULT_LIMIT);
+    return final.slice(0, RESULT_LIMIT);
 }
 
 // Fuzzy matching scorer

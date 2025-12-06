@@ -738,11 +738,6 @@ let searchResultPins = [];
 // 🆕 Track which steps have been announced to avoid repeating
 let announcedSteps = new Set();
 let compassMode = 0;
-let NAV_MODE = "north"; 
-// "north"   → map stays north
-// "heading" → rotate with GPS direction
-// "manual"  → user controls map freely
-
 const UI = {
   aiBox: document.getElementById("ai-tip"),
   speedEl: document.getElementById("speed"),
@@ -1011,16 +1006,20 @@ let userHasTouchedMap = false;
 let lastHeading = 0;
 
 map.on("movestart", (e) => {
+    // only cancel auto-follow if the user moved the map — not system
     if (e.originalEvent) {
-        NAV_MODE = "manual";
+        follow = false;
         autoCenter = false;
         autoRotation = false;
         userHasTouchedMap = true;
-        compassBtn.style.background = "#444";
-        compassBtn.innerText = "✋";
     }
 });
-
+map.on("dragstart", () => {
+    follow = false;
+    autoCenter = false;
+    autoRotation = false;
+    userHasTouchedMap = true;
+});
 
 // Resume rotation after 2s if user stops interacting
 // 🆕 Resume follow ONLY if 1 minute passes without interaction
@@ -1058,42 +1057,79 @@ if (navigator.geolocation){
     }
 
     // Only rotate if autoRotation is enabled manually
-    // --- FINAL ROTATION ENGINE ---
-    if (NAV_MODE === "heading" && heading !== null) {
-        map.setBearing(heading, { animate: true, duration: 500 });
-    } else if (NAV_MODE === "north") {
-        map.setBearing(0, { animate: true, duration: 500 });
+    if (autoRotation && heading !== null) {
+        const smooth = (heading * 0.85) + (lastHeading * 0.15);
+        map.setBearing(smooth, { animate: true, duration: 500 });
+        lastHeading = smooth;
     }
+
     await adaptiveAIDashboard(latlng, heading);
     smartStepAdvancement(latlng);
     checkUpcomingSteps(latlng);
     maybeRepeatCurrentStep();
     // ===============================
-    // FIXED COMPASS BUTTON BEHAVIOR
+    // UPDATED COMPASS + ROTATION CONTROL
     // ===============================
-    document.getElementById("compass-btn").onclick = () => {
 
-        if (NAV_MODE === "north") {
-            NAV_MODE = "heading";
-            autoRotation = true;
-            follow = true;
-            autoCenter = true;
-            userHasTouchedMap = false;
-            compassBtn.style.background = "#00b36b";
-            compassBtn.innerText = "🧭";
-            return;
+    let rotationMode = "north"; 
+    // "north" = always north-up
+    // "heading" = rotate with GPS heading
+    // "manual" = user rotated map manually
+
+    let lastManualRotateTime = 0;
+    const MANUAL_ROTATION_RESET_TIME = 7000; // 7 seconds
+
+    function setNorthUp(animated = true) {
+        rotationMode = "north";
+        autoRotation = false;
+        map.setBearing(0, { animate: animated, duration: 800 });
+        compassBtn.style.background = "#ff1212";
+        compassBtn.innerText = "⬆️";
+    }
+
+    function setHeadingUp(animated = true) {
+        rotationMode = "heading";
+        autoRotation = true;
+        compassBtn.style.background = "#00b36b";
+        compassBtn.innerText = "🧭";
+    }
+
+    const compassBtn = document.getElementById("compass-btn");
+
+    // COMPASS BUTTON TOGGLE BEHAVIOR
+    compassBtn.onclick = () => {
+        if (rotationMode === "north") {
+            // go to heading-follow mode
+            setHeadingUp(true);
+        } else {
+            // lock back to north
+            setNorthUp(true);
         }
 
-        if (NAV_MODE === "heading") {
-            NAV_MODE = "north";
-            autoRotation = false;
-            map.setBearing(0, { animate: true, duration: 600 });
-            compassBtn.style.background = "#ff1212";
-            compassBtn.innerText = "⬆️";
-            return;
-        }
+        follow = true;
+        autoCenter = true;
+        userHasTouchedMap = false;
     };
 
+    // Detect manual user rotation
+    map.on("rotate", (e) => {
+        if (!e.originalEvent) return;
+        rotationMode = "manual";
+        lastManualRotateTime = Date.now();
+        autoRotation = false;
+    });
+
+    // Detect drag/pinch interaction — mark as manual
+    map.on("movestart", (e) => {
+        if (e.originalEvent) {
+            rotationMode = "manual";
+            lastManualRotateTime = Date.now();
+            autoRotation = false;
+            follow = false; 
+            autoCenter = false;
+            userHasTouchedMap = true;
+        }
+    });
   }, console.warn, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
 // keep map centered automatically if follow mode is ON
@@ -1102,15 +1138,24 @@ setInterval(() => {
         map.panTo(userMarker.getLatLng(), { animate: true });
     }
 }, 4000);
+// AUTO-RESET after manual movement if no interaction for X seconds
 setInterval(() => {
-    if (NAV_MODE === "manual" && !userHasTouchedMap && userMarker) {
-        NAV_MODE = "north";
-        autoCenter = true;
-        autoRotation = false;
-        compassBtn.style.background = "#ff1212";
-        compassBtn.innerText = "⬆️";
+    if (rotationMode === "manual") {
+        const idle = Date.now() - lastManualRotateTime;
+        if (idle > MANUAL_ROTATION_RESET_TIME) {
+            // return to north-up smoothly
+            setNorthUp(true);
+        }
     }
-}, 15000);
+}, 1500);
+
+// Apply heading rotation only when in heading mode
+function applyGPSHeadingRotation(heading) {
+    if (rotationMode !== "heading") return;
+    if (heading == null) return;
+
+    map.setBearing(heading, { animate: true, duration: 500 });
+}
 
 // === Speed Limit (Overpass API - Real Data Only) ===
 let lastSpeedLimit = null;
@@ -1496,6 +1541,8 @@ async function adaptiveAIDashboard(latlng, heading) {
   const currentSpeed = calculateGPSSpeed(latlng);
   const slopeData = await predictElevationAhead(latlng, heading);
   const slope = slopeData.slope;
+  // KEEP YOUR ORIGINAL FUNCTION — only add this line:
+  applyGPSHeadingRotation(heading);
   await getRoadType(latlng);
 
   const eco = ecoAdvisor(800, slope);

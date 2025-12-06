@@ -1050,9 +1050,12 @@ if (navigator.geolocation){
 
     // 🆕 Only follow when follow mode is active
     // Only center if user did NOT interact manually
-    if (follow && autoCenter && !userHasTouchedMap) {
-        map.easeTo(latlng, { animate: true, duration: 350 });
+    if (follow && autoCenter) {
+        if (!userHasTouchedMap) {
+            map.setView(latlng, map.getZoom(), { animate: true });
+        }
     }
+
     // Only rotate if autoRotation is enabled manually
     if (autoRotation && heading !== null) {
         const smooth = (heading * 0.85) + (lastHeading * 0.15);
@@ -1064,7 +1067,21 @@ if (navigator.geolocation){
     smartStepAdvancement(latlng);
     checkUpcomingSteps(latlng);
     maybeRepeatCurrentStep();
+    document.getElementById("compass-btn").onclick = () => {
+        follow = true;
+        autoCenter = true;
+        autoRotation = true;
+        userHasTouchedMap = false;
 
+        if (userMarker) {
+            map.easeTo(userMarker.getLatLng(), { animate:true, duration:400 });
+        }
+
+        // Visual feedback
+        const btn = document.getElementById("compass-btn");
+        btn.style.background = "#00b36b";
+        setTimeout(() => btn.style.background = "#ff1212", 500);
+    };
   }, console.warn, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
 // === Speed Limit (Overpass API - Real Data Only) ===
@@ -1529,74 +1546,7 @@ function animateMarker(timestamp) {
         startLatLng = targetLatLng;
     }
 }
-// ===== GPS watch =====
-if (navigator.geolocation){
-  navigator.geolocation.watchPosition(async pos=>{
-    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
-    updateSpeedLimit(latlng);
-    const currentSpeed = calculateGPSSpeed(latlng);
-    let heading = pos.coords.heading;
-    // If heading is missing -> calculate based on GPS movement
-    if (!heading && window._lastGPSPos) {
-        const dx = pos.coords.longitude - window._lastGPSPos.lng;
-        const dy = pos.coords.latitude - window._lastGPSPos.lat;
-        heading = Math.atan2(dx, dy) * 180 / Math.PI;
-    }
-    const MIN_SPEED_FOR_HEADING = 5/3.6;
-    if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
-      if (carEl) {
-        const m = (carEl.style.transform || "").match(/rotate\(([^)]+)deg\)/);
-        heading = m ? parseFloat(m[1]) : 0;
-      } else heading = 0;
-    }
-    // 🔹 ADD THIS:
-    lastHeading = heading;
-    if(!waypoints.length) waypoints.push(latlng); else waypoints[0]=latlng;
-    // Always update marker position
-    if (!userMarker) {
-        userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
-    } else {
-        userMarker.setLatLng(latlng);
-    }
-    // AUTO FOLLOW AND ROTATE BASED ON HEADING
-    const speedThreshold = 4; // km/h
 
-    if (pos.coords.speed * 3.6 > speedThreshold) {
-        // Real heading from GPS if available
-        if (heading !== null && heading !== 0) {
-            autoRotation = true;
-            map.setBearing(heading, { animate: true, duration: 400 });
-
-            // Rotate car marker to match heading
-            const carSvg = document.getElementById("user-car-svg");
-            if (carSvg) carSvg.style.transform = `rotate(${heading}deg)`;
-        }
-    }
-
-    // Auto-center only if enabled
-    if (autoCenter && !userHasTouchedMap) {
-        map.easeTo(latlng, { animate: true, duration: 300 });
-    }
-    // Auto resume rotation if user stopped interacting
-    if (!autoRotation && Date.now() - lastManualRotation > manualRotationTimeout && currentSpeed > 3) {
-        autoRotation = true;
-    }
-    document.getElementById("compass-btn").onclick = () => {
-        follow = true;
-        autoCenter = true;
-        autoRotation = true;
-        userHasTouchedMap = false;
-
-        if (userMarker) {
-            map.easeTo(userMarker.getLatLng(), { animate: true, duration: 400 });
-        }
-
-        const btn = document.getElementById("compass-btn");
-        btn.style.background = "#00b36b";
-        setTimeout(() => btn.style.background = "#ff1212", 600);
-    };
-  }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
-}
 // ================== AI LOOP (runs once every 900 ms) ==================
 setInterval(() => {
     if (!userMarker || useVirtualGPS) return;

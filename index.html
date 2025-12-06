@@ -737,7 +737,7 @@ let gmSearchRequestId = 0;
 let searchResultPins = [];
 // 🆕 Track which steps have been announced to avoid repeating
 let announcedSteps = new Set();
-
+let compassMode = "north"; 
 const UI = {
   aiBox: document.getElementById("ai-tip"),
   speedEl: document.getElementById("speed"),
@@ -1057,7 +1057,7 @@ if (navigator.geolocation){
     }
 
     // Only rotate if autoRotation is enabled manually
-    if (autoRotation && heading !== null) {
+    if (autoRotation && heading !== null && compassMode === "heading") {
         const smooth = (heading * 0.85) + (lastHeading * 0.15);
         map.setBearing(smooth, { animate: true, duration: 500 });
         lastHeading = smooth;
@@ -1075,22 +1075,40 @@ if (navigator.geolocation){
 
         follow = true;
         autoCenter = true;
-        autoRotation = false;   // TURN OFF dynamic rotation
         userHasTouchedMap = false;
 
-        // Reset map rotation to normal (0 degrees)
-        map.setBearing(0, { animate: true, duration: 800 });
+        // If navigation active → toggle mode
+        if (activeRouteIndex !== null) {
+            compassMode = (compassMode === "north") ? "heading" : "north";
+        } else {
+            // If no route → always heading mode
+            compassMode = "heading";
+        }
 
-        // Smooth recenter on car
-        map.flyTo(userMarker.getLatLng(), 19, { animate: true, duration: 1 });
+        applyCompassMode();
 
-        // Visual feedback
         const btn = document.getElementById("compass-btn");
         btn.style.background = "#00b36b";
-        setTimeout(() => btn.style.background = "#ff1212", 500);
+        setTimeout(() => btn.style.background = "#ff1212", 400);
     };
   }, console.warn, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
+function applyCompassMode() {
+    if (!userMarker) return;
+    const userPos = userMarker.getLatLng();
+    if (compassMode === "north") {
+        autoRotation = false;
+        map.setBearing(0, { animate: true, duration: 600 });
+        map.easeTo(userPos, { animate:true, duration: 500 });
+        return;
+    }
+    if (compassMode === "heading") {
+        autoRotation = true;
+        // Rotation will be applied in watchPosition loop
+        map.easeTo(userPos, { animate:true, duration: 500 });
+    }
+}
+
 // keep map centered automatically if follow mode is ON
 setInterval(() => {
     if (follow && autoCenter && userMarker && !userHasTouchedMap) {
@@ -1297,6 +1315,18 @@ function smartStepAdvancement(latlng) {
     speak(announcement, "step", { interrupt: true });
     announcedSteps.add(currentStepIndex);
   }
+}
+// Auto switch back to NORTH if following route and user is close to next step
+if (activeRouteIndex !== null && compassMode === "heading") {
+    const next = routes[activeRouteIndex]?.steps[currentStepIndex];
+
+    if (next) {
+        const dist = userMarker.getLatLng().distanceTo(L.latLng(next.lat, next.lng));
+        if (dist < 30) {
+            compassMode = "north";
+            applyCompassMode();
+        }
+    }
 }
 
 // 🆕 Check for upcoming step announcements

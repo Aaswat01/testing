@@ -1005,14 +1005,13 @@ let autoRotation = false;  // rotation OFF by default
 let userHasTouchedMap = false;
 let lastHeading = 0;
 
-map.on("movestart", (e) => {
-    // only cancel auto-follow if the user moved the map — not system
-    if (e.originalEvent) {
-        follow = false;
-        autoCenter = false;
-        autoRotation = false;
-        userHasTouchedMap = true;
-    }
+// Stop auto rotate when user moves map
+map.on("mousedown touchstart", () => {
+    follow = false;
+    autoRotation = false;
+    autoCenter = false;
+    userHasTouchedMap = true;
+    lastUserInteraction = Date.now();
 });
 
 // Resume rotation after 2s if user stops interacting
@@ -1543,11 +1542,8 @@ if (navigator.geolocation){
     // Always update marker position
     if (!userMarker) {
         userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
-        startLatLng = latlng;
     } else {
-        startLatLng = userMarker.getLatLng();
-        targetLatLng = latlng;
-        requestAnimationFrame(animateMarker);
+        userMarker.setLatLng(latlng);
     }
     // AUTO FOLLOW AND ROTATE BASED ON HEADING
     const speedThreshold = 4; // km/h
@@ -1577,7 +1573,6 @@ if (navigator.geolocation){
         autoRotation = false;
         follow = true; 
         autoCenter = true;
-        manualOverride = false;
 
         // Reset map rotation
         map.setBearing(0, { animate: true, duration: 400 });

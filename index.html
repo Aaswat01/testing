@@ -1005,9 +1005,7 @@ let follow = true;
 let mapRotationMode = "north"; 
 // "north" = always North facing
 // "heading" = rotate with car direction
-// Fix rotation behavior: NO manual rotation allowed
-map.dragRotate.disable();
-map.touchRotate.disable();
+
 let rotationHoldTimer = null;
 const ROTATION_RETURN_DELAY = 5000; // return to north after 5 seconds of no touch
 
@@ -1068,6 +1066,7 @@ if (navigator.geolocation){
     // Only rotate if autoRotation is enabled manually
     applyAutoRotation(heading);
 
+
     await adaptiveAIDashboard(latlng, heading);
     smartStepAdvancement(latlng);
     checkUpcomingSteps(latlng);
@@ -1103,6 +1102,10 @@ setInterval(() => {
         map.panTo(userMarker.getLatLng(), { animate: true });
     }
 }, 4000);
+// Fix rotation behavior: NO manual rotation allowed
+map.dragRotate.disable();
+map.touchRotate.disable();
+
 // Apply rotation smoothly ONLY when compass mode enabled
 function applyAutoRotation(heading) {
     if (mapRotationMode !== "heading") return;

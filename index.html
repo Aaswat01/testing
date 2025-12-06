@@ -1005,13 +1005,16 @@ let autoRotation = false;  // rotation OFF by default
 let userHasTouchedMap = false;
 let lastHeading = 0;
 
-// Stop auto rotate when user moves map
-map.on("mousedown touchstart", () => {
-    follow = false;
-    autoRotation = false;
-    autoCenter = false;
+// === FIX: allow manual map movement during navigation ===
+map.on("movestart", (e) => {
+    if (!e.originalEvent) return;
     userHasTouchedMap = true;
-    lastUserInteraction = Date.now();
+    follow = false;
+    autoCenter = false;
+    // Map should stop rotating ONLY temporarily, not permanently
+    // So we delay recovery later (see below)
+    autoRotation = false;
+    // Show visual "free look mode" if needed later
 });
 
 // Resume rotation after 2s if user stops interacting
@@ -1479,7 +1482,7 @@ async function adaptiveAIDashboard(latlng, heading) {
             triggerReroute(latlng, route);
 
             // Cooldown to avoid reroute loops
-            setTimeout(() => route._isRerouting = false, 12000);
+            setTimeout(() => route._isRerouting = false, 9000);
         }
     }
     // 🆕 Check for upcoming step announcements
@@ -1547,21 +1550,21 @@ if (navigator.geolocation){
     }
     // AUTO FOLLOW AND ROTATE BASED ON HEADING
     const speedThreshold = 4; // km/h
-
+    // === FIXED ROTATION LOGIC ===
     if (pos.coords.speed * 3.6 > speedThreshold) {
-        // Real heading from GPS if available
-        if (heading !== null && heading !== 0) {
-            autoRotation = true;
-            map.setBearing(heading, { animate: true, duration: 400 });
-
-            // Rotate car marker to match heading
-            const carSvg = document.getElementById("user-car-svg");
-            if (carSvg) carSvg.style.transform = `rotate(${heading}deg)`;
+        
+        // Only rotate map if user did NOT touch map recently
+        if (autoRotation && !userHasTouchedMap) {
+            map.setBearing(heading, { animate: true, duration: 350 });
         }
+
+        // Car points at heading ALWAYS (independent from map rotation)
+        const carSvg = document.getElementById("user-car-svg");
+        if (carSvg) carSvg.style.transform = `rotate(${heading}deg)`;
     }
 
     // Auto-center only if enabled
-    if (autoCenter) {
+    if (autoCenter && !userHasTouchedMap) {
         map.panTo(latlng, { animate: true });
     }
 
@@ -1570,17 +1573,17 @@ if (navigator.geolocation){
         autoRotation = true;
     }
     document.getElementById("compass-btn").onclick = () => {
+        userHasTouchedMap = false;
         autoRotation = false;
         follow = true; 
         autoCenter = true;
 
         // Reset map rotation
-        map.setBearing(0, { animate: true, duration: 400 });
+        map.setBearing(lastHeading || 0, { animate: true, duration: 350 });
 
         // Reset car icon rotation
         const carEl = document.getElementById("user-car-svg");
-        if (carEl) carEl.style.transform = "rotate(0deg)";
-
+        if (carEl) carEl.style.transform = `rotate(${lastHeading}deg)`;
         // Visual feedback
         const btn = document.getElementById("compass-btn");
         btn.style.background = "#00b36b";
@@ -1719,6 +1722,13 @@ async function safeReroute(route, startLL, destLL) {
         // hide default routing UI from Leaflet
         document.querySelectorAll(".leaflet-routing-container")
             .forEach(x => x.style.display = "none");
+        // 🔧 FIX: force routing line to attach to our route.group
+        setTimeout(() => {
+            if (route.rc && route.rc._line) {
+                route.group.addLayer(route.rc._line);
+                route.rc._line.setStyle({ color, weight: 6, opacity: 1 });
+            }
+        }, 600);
 
         // rebuild step list
         const box = document.querySelector(`#route-box-${routeIndex} .route-content`);

@@ -739,7 +739,6 @@ let searchResultPins = [];
 let announcedSteps = new Set();
 let compassMode = 0;
 let rotationLocked = false;
-let compassForceMode = false; // stops map from changing rotation automatically
 
 const UI = {
   aiBox: document.getElementById("ai-tip"),
@@ -1015,10 +1014,6 @@ map.on("movestart", (e) => {
         autoCenter = false;
         autoRotation = false;
         userHasTouchedMap = true;
-        compassForceMode = false;
-        compassMode = 0;
-        document.getElementById("compass-btn").innerHTML = "⬆️";
-        document.getElementById("compass-btn").style.background = "#ff1212";
     }
 });
 map.on("dragstart", () => {
@@ -1064,8 +1059,7 @@ if (navigator.geolocation){
     }
 
     // Only rotate if autoRotation is enabled manually
-    // Prevent auto-rotation if compass forced mode is active
-    if (!compassForceMode && autoRotation && heading !== null) {
+    if (!rotationLocked && autoRotation && heading !== null) {
         const smooth = (heading * 0.85) + (lastHeading * 0.15);
         map.setBearing(smooth, { animate: true, duration: 500 });
         lastHeading = smooth;
@@ -1087,41 +1081,44 @@ if (navigator.geolocation){
 
         const btn = document.getElementById("compass-btn");
 
-        // --- MODE 0: Always North-UP ---
+        // MODE 0 → NORTH FIXED
         if (compassMode === 0) {
-            compassForceMode = true;
+            rotationLocked = true;
             autoRotation = false;
-
-            map.setBearing(0, { animate: true, duration: 800 });
-            map.panTo(userMarker.getLatLng(), { animate: true });
-
+            map.setBearing(0, { animate:true, duration:600 });
             btn.style.background = "#ff1212";
             btn.innerHTML = "⬆️";
             return;
         }
 
-        // --- MODE 1: Route/Heading UP ---
+        // MODE 1 → ROUTE UP / HEADING UP
         if (compassMode === 1) {
-            autoRotation = false;
-            compassForceMode = true;
 
-            // Determine best angle (route > GPS heading)
+            rotationLocked = true; // stop auto heading from overriding immediately
+
+            // Calculate next angle
             let angle = null;
 
             if (activeRouteIndex !== null && routes[activeRouteIndex]?.steps?.length > 1) {
                 const route = routes[activeRouteIndex];
                 const step = route.steps[currentStepIndex];
                 const nextStep = route.steps[currentStepIndex + 1];
+
                 if (nextStep) {
                     angle = Math.atan2(nextStep.lng - step.lng, nextStep.lat - step.lat) * 180 / Math.PI;
                 }
             }
 
             if (angle === null) angle = lastHeading;
+
             angle = (angle + 360) % 360;
 
-            map.setBearing(angle, { animate: true, duration: 800 });
-            map.panTo(userMarker.getLatLng(), { animate: true });
+            map.setBearing(angle, { animate:true, duration:600 });
+
+            setTimeout(() => {
+                rotationLocked = false;
+                autoRotation = true;
+            }, 900); // allow rotation after animation finishes
 
             btn.style.background = "#00b36b";
             btn.innerHTML = "🧭";
@@ -2685,3 +2682,4 @@ micBtn.onclick = async () => {
 </script>
 </body>
 </html>
+

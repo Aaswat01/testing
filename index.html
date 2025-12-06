@@ -1059,11 +1059,46 @@ if (navigator.geolocation){
     }
 
     // Only rotate if autoRotation is enabled manually
-    if (!rotationLocked && autoRotation && heading !== null) {
-        const smooth = (heading * 0.85) + (lastHeading * 0.15);
-        map.setBearing(smooth, { animate: true, duration: 500 });
-        lastHeading = smooth;
+    // === FIXED ROTATION RULES ===
+    // MODE 0 = North Up → No rotation
+    if (compassMode === 0) {
+        autoRotation = false;
+        return;
     }
+
+    // MODE 1 = Route-Up → rotate ONLY to route direction, NOT GPS heading
+    if (compassMode === 1) {
+
+        if (!autoRotation) return; // waiting for compass animation
+
+        // Calculate route angle
+        let angle = null;
+
+        if (activeRouteIndex !== null && routes[activeRouteIndex]?.steps?.length > 1) {
+            const route = routes[activeRouteIndex];
+            const step = route.steps[currentStepIndex];
+            const nextStep = route.steps[currentStepIndex + 1];
+
+            if (nextStep) {
+                angle = Math.atan2(nextStep.lng - step.lng, nextStep.lat - step.lat) * 180 / Math.PI;
+            }
+        }
+
+        // fallback if no route available → do NOT rotate
+        if (angle === null) return;
+
+        // smooth rotation
+        angle = (angle + 360) % 360;
+        const smooth = (angle * 0.8) + (lastHeading * 0.2);
+
+        rotationLocked = true;
+        map.setBearing(smooth, { animate: true, duration: 600 });
+
+        lastHeading = smooth;
+
+        setTimeout(() => rotationLocked = false, 650);
+    }
+
     await adaptiveAIDashboard(latlng, heading);
     smartStepAdvancement(latlng);
     checkUpcomingSteps(latlng);

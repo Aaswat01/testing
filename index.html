@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TJL - Location-Based Navigation</title>
+<title>TJL</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -1001,10 +1001,54 @@ function updateVirtualGPS(latlng) {
 }
 /* ---------------- ROTATION CONTROL ---------------- */
 let follow = true;
+// === NEW ROTATION STATE CONTROL ===
+let mapRotationMode = "north"; 
+// "north" = always North facing
+// "heading" = rotate with car direction
+
+let rotationHoldTimer = null;
 const ROTATION_RETURN_DELAY = 5000; // return to north after 5 seconds of no touch
 
+let userHasTouchedMap = false;
 let lastHeading = 0;
 
+map.on("movestart", (e) => {
+    // only cancel auto-follow if the user moved the map — not system
+    if (e.originalEvent) {
+        follow = false;
+        autoCenter = false;
+        autoRotation = false;
+        userHasTouchedMap = true;
+    }
+});
+map.on("dragstart", () => {
+    follow = false;
+    autoCenter = false;
+    autoRotation = false;
+    userHasTouchedMap = true;
+});
+// 🆕 Detect manual rotation event
+map.on("rotate", () => {
+    if (mapRotationMode === "heading") return; // ignore if user enabled heading mode
+
+    userHasTouchedMap = true;
+
+    // Reset return timer
+    if (rotationHoldTimer) clearTimeout(rotationHoldTimer);
+
+    rotationHoldTimer = setTimeout(() => {
+        if (mapRotationMode === "north") {
+            map.setBearing(0, { animate: true, duration: 600 });
+            userHasTouchedMap = false;
+        }
+    }, ROTATION_RETURN_DELAY);
+});
+
+// Resume rotation after 2s if user stops interacting
+// 🆕 Resume follow ONLY if 1 minute passes without interaction
+map.on("dragend zoomend rotateend", () => {
+    lastUserInteraction = Date.now();
+});
 // Modify GPS watcher to detect permission denial
 if (navigator.geolocation){
   navigator.geolocation.watchPosition(async pos=>{
@@ -1036,12 +1080,10 @@ if (navigator.geolocation){
     }
 
     // Only rotate if autoRotation is enabled manually
-    if (userMarker && heading !== null) {
-        if (headingMode) {
-            const smooth = (heading * 0.85) + (lastHeading * 0.15);
-            map.setBearing(smooth, { animate: true, duration: 450 });
-            lastHeading = smooth;
-        }
+    if (mapRotationMode === "heading" && autoRotation && heading !== null) {
+        const smooth = (heading * 0.85) + (lastHeading * 0.15);
+        map.setBearing(smooth, { animate: true, duration: 500 });
+        lastHeading = smooth;
     }
 
     await adaptiveAIDashboard(latlng, heading);
@@ -1051,25 +1093,27 @@ if (navigator.geolocation){
     // ===============================
     // FIXED COMPASS BUTTON BEHAVIOR
     // ===============================
-    let headingMode = false;
-
     document.getElementById("compass-btn").onclick = () => {
-
-        headingMode = !headingMode;
+        if (!userMarker) return;
 
         const btn = document.getElementById("compass-btn");
 
-        if (headingMode) {
+        // Toggle modes
+        if (mapRotationMode === "north") {
+            mapRotationMode = "heading";
+            autoRotation = true;
+            follow = true;
+            userHasTouchedMap = false;
+
             btn.style.background = "#00b36b";
-            btn.textContent = "🧭";
-            follow = true;
-            autoCenter = true;
+            btn.innerText = "🧭";
         } else {
+            mapRotationMode = "north";
+            autoRotation = false;
+            map.setBearing(0, { animate: true, duration: 500 });
+
             btn.style.background = "#ff1212";
-            btn.textContent = "⬆️";
-            map.setBearing(0, { animate: true, duration: 600 });
-            follow = true;
-            autoCenter = true;
+            btn.innerText = "⬆️";
         }
     };
 
@@ -1547,10 +1591,12 @@ function animateMarker(timestamp) {
 
 // ================== AI LOOP (runs once every 900 ms) ==================
 setInterval(() => {
-    if (!userMarker) return;
-    if (!follow || !autoCenter) return;
-    map.panTo(userMarker.getLatLng(), { animate: true });
-}, 2000);
+    if (!userMarker || useVirtualGPS) return;
+    // Prevent snapping map every loop when user is interacting
+    if (userHasTouchedMap) return;
+    const latlng = userMarker.getLatLng();
+    adaptiveAIDashboard(latlng, lastHeading);
+}, 900);
 
 let driverCountry = null;
 async function updateDriverCountry(latlng) {
@@ -2028,13 +2074,10 @@ document.getElementById("map-toggle").addEventListener("click",()=>{
 document.getElementById("locate-btn").onclick = () => {
     follow = true;
     autoCenter = true;
-    if (!headingMode) {
-        map.setBearing(0, { animate: true, duration: 500 });
-    }
-    if (userMarker)
-        map.flyTo(userMarker.getLatLng(), 18, { animate: true, duration: 900 });
+    userHasTouchedMap = false; 
+    // NOTE: Do NOT enable autoRotation here.
+    map.flyTo(userMarker.getLatLng(), 19, { animate:true, duration:0.9 });
 };
-
 // ===== Search =====
 const input = document.getElementById("searchInput");
 const suggestBox = document.getElementById("suggestBox");
@@ -2630,3 +2673,4 @@ micBtn.onclick = async () => {
 </script>
 </body>
 </html>
+still tes

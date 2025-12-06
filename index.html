@@ -1001,9 +1001,8 @@ function updateVirtualGPS(latlng) {
 }
 /* ---------------- ROTATION CONTROL ---------------- */
 let follow = true;
-let autoRotation = true;
+let autoRotation = false;  // rotation OFF by default
 let userHasTouchedMap = false;
-
 let lastHeading = 0;
 
 map.on("movestart", (e) => {
@@ -1015,6 +1014,12 @@ map.on("movestart", (e) => {
         userHasTouchedMap = true;
     }
 });
+map.on("dragstart", () => {
+    follow = false;
+    autoCenter = false;
+    autoRotation = false;
+    userHasTouchedMap = true;
+});
 
 // Resume rotation after 2s if user stops interacting
 // 🆕 Resume follow ONLY if 1 minute passes without interaction
@@ -1023,48 +1028,44 @@ map.on("dragend zoomend rotateend", () => {
 });
 // Modify GPS watcher to detect permission denial
 if (navigator.geolocation){
-  navigator.geolocation.watchPosition(async pos => {
+  navigator.geolocation.watchPosition(async pos=>{
+    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    updateSpeedLimit(latlng);
 
-      const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
-      updateSpeedLimit(latlng);
+    const currentSpeed = calculateGPSSpeed(latlng);
+    let heading = pos.coords.heading;
 
-      const speed = pos.coords.speed * 3.6;
-      const gpsHeading = pos.coords.heading;
-      
-      let heading;
+    const MIN_SPEED_FOR_HEADING = 5/3.6;
+    if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
+      heading = lastHeading || 0;
+    }
+    lastHeading = heading;
 
-      // Only take heading if moving
-      if (speed > 5 && gpsHeading !== null) {
-          heading = gpsHeading;
-      } else {
-          heading = lastHeading;
-      }
+    if(!userMarker){
+      userMarker = L.marker(latlng,{icon:carIcon}).addTo(map);
+      map.setView(latlng, 19);
+    } else {
+      userMarker.setLatLng(latlng);
+    }
 
-      lastHeading = heading;
+    // 🆕 Only follow when follow mode is active
+    // Only center if user did NOT interact manually
+    if (follow && autoCenter && !userHasTouchedMap) {
+        map.easeTo(latlng, { animate: true, duration: 350 });
+    }
+    // Only rotate if autoRotation is enabled manually
+    if (autoRotation && heading !== null) {
+        const smooth = (heading * 0.85) + (lastHeading * 0.15);
+        map.setBearing(smooth, { animate: true, duration: 500 });
+        lastHeading = smooth;
+    }
 
-      // Move marker
-      if (!userMarker) {
-          userMarker = L.marker(latlng, { icon: carIcon }).addTo(map);
-      } else {
-          userMarker.setLatLng(latlng);
-      }
-
-      // Follow position only if user did NOT touch map
-      if (follow && !userHasTouchedMap) {
-          map.panTo(latlng, { animate: true });
-      }
-
-      // Rotate map based on movement direction ONLY
-      if (!userHasTouchedMap && autoRotation && speed > 5) {
-          map.setBearing(heading, { animate: true, duration: 350 });
-      }
-
-      adaptiveAIDashboard(latlng, heading);
-      smartStepAdvancement(latlng);
-      checkUpcomingSteps(latlng);
+    await adaptiveAIDashboard(latlng, heading);
+    smartStepAdvancement(latlng);
+    checkUpcomingSteps(latlng);
+    maybeRepeatCurrentStep();
 
   }, console.warn, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
-
 }
 // === Speed Limit (Overpass API - Real Data Only) ===
 let lastSpeedLimit = null;
@@ -1535,9 +1536,14 @@ if (navigator.geolocation){
     updateSpeedLimit(latlng);
     const currentSpeed = calculateGPSSpeed(latlng);
     let heading = pos.coords.heading;
+    // If heading is missing -> calculate based on GPS movement
+    if (!heading && window._lastGPSPos) {
+        const dx = pos.coords.longitude - window._lastGPSPos.lng;
+        const dy = pos.coords.latitude - window._lastGPSPos.lat;
+        heading = Math.atan2(dx, dy) * 180 / Math.PI;
+    }
     const MIN_SPEED_FOR_HEADING = 5/3.6;
     if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
-      const carEl = document.getElementById('user-car-svg');
       if (carEl) {
         const m = (carEl.style.transform || "").match(/rotate\(([^)]+)deg\)/);
         heading = m ? parseFloat(m[1]) : 0;
@@ -1568,32 +1574,34 @@ if (navigator.geolocation){
     }
 
     // Auto-center only if enabled
-    if (autoCenter) {
-        map.panTo(latlng, { animate: true });
+    if (autoCenter && !userHasTouchedMap) {
+        map.easeTo(latlng, { animate: true, duration: 300 });
     }
-
     // Auto resume rotation if user stopped interacting
     if (!autoRotation && Date.now() - lastManualRotation > manualRotationTimeout && currentSpeed > 3) {
         autoRotation = true;
     }
     document.getElementById("compass-btn").onclick = () => {
-        follow = false; 
-        autoRotation = false;
-        userHasTouchedMap = true;
-        autoCenter = false;
+        follow = true;
+        autoCenter = true;
+        autoRotation = true;
+        userHasTouchedMap = false;
 
-        map.setBearing(0, { animate: true });
+        if (userMarker) {
+            map.easeTo(userMarker.getLatLng(), { animate: true, duration: 400 });
+        }
 
         const btn = document.getElementById("compass-btn");
         btn.style.background = "#00b36b";
-        setTimeout(() => btn.style.background = "#ff1212", 500);
+        setTimeout(() => btn.style.background = "#ff1212", 600);
     };
-
   }, ()=>console.warn("GPS unavailable"), { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
 // ================== AI LOOP (runs once every 900 ms) ==================
 setInterval(() => {
     if (!userMarker || useVirtualGPS) return;
+    // Prevent snapping map every loop when user is interacting
+    if (userHasTouchedMap) return;
     const latlng = userMarker.getLatLng();
     adaptiveAIDashboard(latlng, lastHeading);
 }, 900);
@@ -2078,26 +2086,6 @@ document.getElementById("locate-btn").onclick = () => {
     // NOTE: Do NOT enable autoRotation here.
     map.flyTo(userMarker.getLatLng(), 19, { animate:true, duration:0.9 });
 };
-document.getElementById("compass-btn").onclick = () => {
-
-    // Stop all automatic behavior
-    follow = true;
-    autoRotation = false;
-    userHasTouchedMap = true;
-    autoCenter = false;
-
-    // Hard reset rotation & car icon alignment
-    map.setBearing(0, { animate: true, duration: 250 });
-
-    const svg = document.getElementById("user-car-svg");
-    if (svg) svg.style.transform = "rotate(0deg) !important";  // car icon straight
-
-    // Button feedback
-    const btn = document.getElementById("compass-btn");
-    btn.style.background = "#00b36b";
-    setTimeout(() => btn.style.background = "#1e90ff", 500);
-};
-
 // ===== Search =====
 const input = document.getElementById("searchInput");
 const suggestBox = document.getElementById("suggestBox");
@@ -2693,3 +2681,5 @@ micBtn.onclick = async () => {
 </script>
 </body>
 </html>
+
+

@@ -738,8 +738,6 @@ let searchResultPins = [];
 // 🆕 Track which steps have been announced to avoid repeating
 let announcedSteps = new Set();
 let compassMode = 0;
-let rotationLocked = false;
-
 const UI = {
   aiBox: document.getElementById("ai-tip"),
   speedEl: document.getElementById("speed"),
@@ -1059,11 +1057,12 @@ if (navigator.geolocation){
     }
 
     // Only rotate if autoRotation is enabled manually
-    if (!rotationLocked && autoRotation && heading !== null) {
+    if (autoRotation && heading !== null) {
         const smooth = (heading * 0.85) + (lastHeading * 0.15);
         map.setBearing(smooth, { animate: true, duration: 500 });
         lastHeading = smooth;
     }
+
     await adaptiveAIDashboard(latlng, heading);
     smartStepAdvancement(latlng);
     checkUpcomingSteps(latlng);
@@ -1074,58 +1073,64 @@ if (navigator.geolocation){
     document.getElementById("compass-btn").onclick = () => {
         if (!userMarker) return;
 
-        compassMode = (compassMode + 1) % 2;
+        compassMode = (compassMode + 1) % 2; // cycle 0 → 1 → 0
+
         follow = true;
         autoCenter = true;
         userHasTouchedMap = false;
 
         const btn = document.getElementById("compass-btn");
 
-        // MODE 0 → NORTH FIXED
+        // === MODE 0 → FORCE NORTH ===
         if (compassMode === 0) {
-            rotationLocked = true;
             autoRotation = false;
-            map.setBearing(0, { animate:true, duration:600 });
+            map.setBearing(0, { animate: true, duration: 800 });
+            map.flyTo(userMarker.getLatLng(), 19, { animate: true, duration: 1 });
+
             btn.style.background = "#ff1212";
-            btn.innerHTML = "⬆️";
+            btn.innerText = "⬆️";
             return;
         }
 
-        // MODE 1 → ROUTE UP / HEADING UP
+        // === MODE 1 → ROUTE-UP OR HEADING-UP ===
         if (compassMode === 1) {
 
-            rotationLocked = true; // stop auto heading from overriding immediately
-
-            // Calculate next angle
+            // If we have a next route step → rotate toward that
             let angle = null;
 
-            if (activeRouteIndex !== null && routes[activeRouteIndex]?.steps?.length > 1) {
+            if (activeRouteIndex !== null && routes[activeRouteIndex]?.steps?.length) {
+
                 const route = routes[activeRouteIndex];
+
+                // Use current and next step to compute road direction
                 const step = route.steps[currentStepIndex];
                 const nextStep = route.steps[currentStepIndex + 1];
 
                 if (nextStep) {
-                    angle = Math.atan2(nextStep.lng - step.lng, nextStep.lat - step.lat) * 180 / Math.PI;
+                    angle = Math.atan2(
+                        (nextStep.lng - step.lng),
+                        (nextStep.lat - step.lat)
+                    ) * 180 / Math.PI;
                 }
             }
 
-            if (angle === null) angle = lastHeading;
+            // If no active route, fallback to GPS heading
+            if (angle === null && typeof lastHeading === "number") {
+                angle = lastHeading;
+            }
 
-            angle = (angle + 360) % 360;
+            // Normalize angle
+            if (angle !== null) {
+                angle = (angle + 360) % 360;
+                map.setBearing(angle, { animate: true, duration: 800 });
+            }
 
-            map.setBearing(angle, { animate:true, duration:600 });
-
-            setTimeout(() => {
-                rotationLocked = false;
-                autoRotation = true;
-            }, 900); // allow rotation after animation finishes
-
+            autoRotation = true;
             btn.style.background = "#00b36b";
-            btn.innerHTML = "🧭";
+            btn.innerText = "🧭";
             return;
         }
     };
-
   }, console.warn, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
 // keep map centered automatically if follow mode is ON
@@ -2683,3 +2688,5 @@ micBtn.onclick = async () => {
 </body>
 </html>
 
+
+still

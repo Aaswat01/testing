@@ -1005,12 +1005,9 @@ let autoRotation = false;  // rotation OFF by default
 let userHasTouchedMap = false;
 let lastHeading = 0;
 
-// Stop auto rotate when user moves map
-let manualOverride = false;
 map.on("movestart", (e) => {
     // only cancel auto-follow if the user moved the map — not system
     if (e.originalEvent) {
-        manualOverride = true;
         follow = false;
         autoCenter = false;
         autoRotation = false;

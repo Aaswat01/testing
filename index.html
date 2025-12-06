@@ -1067,15 +1067,22 @@ if (navigator.geolocation){
     smartStepAdvancement(latlng);
     checkUpcomingSteps(latlng);
     maybeRepeatCurrentStep();
+    // ===============================
+    // FIXED COMPASS BUTTON BEHAVIOR
+    // ===============================
     document.getElementById("compass-btn").onclick = () => {
+        if (!userMarker) return;
+
         follow = true;
         autoCenter = true;
-        autoRotation = true;
+        autoRotation = false;   // TURN OFF dynamic rotation
         userHasTouchedMap = false;
 
-        if (userMarker) {
-            map.easeTo(userMarker.getLatLng(), { animate:true, duration:400 });
-        }
+        // Reset map rotation to normal (0 degrees)
+        map.setBearing(0, { animate: true, duration: 800 });
+
+        // Smooth recenter on car
+        map.flyTo(userMarker.getLatLng(), 19, { animate: true, duration: 1 });
 
         // Visual feedback
         const btn = document.getElementById("compass-btn");
@@ -1084,6 +1091,13 @@ if (navigator.geolocation){
     };
   }, console.warn, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
+// keep map centered automatically if follow mode is ON
+setInterval(() => {
+    if (follow && autoCenter && userMarker && !userHasTouchedMap) {
+        map.panTo(userMarker.getLatLng(), { animate: true });
+    }
+}, 4000);
+
 // === Speed Limit (Overpass API - Real Data Only) ===
 let lastSpeedLimit = null;
 let lastSpeedLimitFetch = 0;

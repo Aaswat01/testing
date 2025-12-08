@@ -2006,6 +2006,11 @@ rc.on("routesfound", async e => {
         updateStepUI(routeIndex, 0, "active");
         announcedSteps.add(0);
       }
+      // 🧭 ⭐ AUTO ROUTE-UP MODE WHEN ROUTE IS READY ⭐
+      autoRotation = true;
+      follow = true;
+      autoCenter = true;
+      setTimeout(() => rotateTowardRoute(), 600);
       
       // Virtual GPS Trigger
       if (useVirtualGPS && steps.length > 0) {

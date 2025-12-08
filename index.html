@@ -886,6 +886,7 @@ approvalStartBtn.addEventListener("click", () => {
   autoRotation = true;
   follow = true;
   lastUserInteraction = Date.now();
+  rotateTowardRoute();
 
   // 🆕 Enable auto-rotation toward route when navigation begins    
   // ✅ FIX: Clear search pins when navigation actually starts
@@ -1545,10 +1546,24 @@ async function adaptiveAIDashboard(latlng, heading) {
     checkUpcomingSteps(latlng);
 
     // Calculate remaining distance
-    let remaining = 0;
-    for (let i = currentStepIndex; i < steps.length; i++) remaining += steps[i].distance;
-    const distanceEl = document.getElementById(`route-distance-${routeDisplayIndex}`);
-    if (distanceEl) distanceEl.textContent = `${(remaining / 1000).toFixed(1)} km remaining`;
+    // 🔁 Update box distance live as driver moves
+    if (route.steps && route.steps.length) {
+        let remainingDist = 0;
+        
+        // Distance from driver to current step start
+        const curStep = steps[currentStepIndex];
+        const curLL = L.latLng(curStep.lat, curStep.lng);
+        remainingDist += latlng.distanceTo(curLL);
+
+        // Sum remaining steps
+        for (let i = currentStepIndex; i < steps.length; i++) {
+            remainingDist += steps[i].distance;
+        }
+
+        const distKm = (remainingDist / 1000).toFixed(1);
+        const distanceEl = document.getElementById(`route-distance-${routeDisplayIndex}`);
+        if (distanceEl) distanceEl.textContent = `${distKm} km remaining`;
+    }
   }
 
   checkWarnings(currentSpeed, eco);
@@ -2679,3 +2694,4 @@ micBtn.onclick = async () => {
 </script>
 </body>
 </html>
+

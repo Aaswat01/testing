@@ -884,9 +884,9 @@ approvalStartBtn.addEventListener("click", () => {
   if (!preview.active || !preview.end) return;
   // 🆕 Enable auto-rotation toward route when navigation begins
   autoRotation = true;
+  rotateTowardRoute();
   follow = true;
   lastUserInteraction = Date.now();
-  rotateTowardRoute();
 
   // 🆕 Enable auto-rotation toward route when navigation begins    
   // ✅ FIX: Clear search pins when navigation actually starts
@@ -1546,23 +1546,23 @@ async function adaptiveAIDashboard(latlng, heading) {
     checkUpcomingSteps(latlng);
 
     // Calculate remaining distance
-    // 🔁 Update box distance live as driver moves
+    // 🔥 Live updating remaining route distance (GPS based)
     if (route.steps && route.steps.length) {
         let remainingDist = 0;
-        
-        // Distance from driver to current step start
-        const curStep = steps[currentStepIndex];
-        const curLL = L.latLng(curStep.lat, curStep.lng);
-        remainingDist += latlng.distanceTo(curLL);
 
-        // Sum remaining steps
+        // distance from current location to start of active step
+        const curStep = steps[currentStepIndex];
+        const stepLL = L.latLng(curStep.lat, curStep.lng);
+        remainingDist += latlng.distanceTo(stepLL);
+
+        // total remaining steps
         for (let i = currentStepIndex; i < steps.length; i++) {
             remainingDist += steps[i].distance;
         }
 
-        const distKm = (remainingDist / 1000).toFixed(1);
+        const km = (remainingDist / 1000).toFixed(1);
         const distanceEl = document.getElementById(`route-distance-${routeDisplayIndex}`);
-        if (distanceEl) distanceEl.textContent = `${distKm} km remaining`;
+        if (distanceEl) distanceEl.textContent = `${km} km remaining`;
     }
   }
 

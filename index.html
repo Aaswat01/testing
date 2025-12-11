@@ -132,8 +132,8 @@ font-weight:bold;cursor:pointer;box-shadow:0 0.4vh 1vh rgba(0,0,0,0.3);}
     top: 0 !important;
     left: 0 !important;
     width: 100vw !important;
-    height: 100vh !important;
-    z-index: 500 !important;   /* LOWERED so approval panel is above */
+    height: 105vh !important;
+    z-index: 9999 !important;
     padding: 0 !important;
 }
 
@@ -205,22 +205,21 @@ align-items:center;color:#fff;font-size:0.9rem;}
 
 /* === Slide-up Approval Panel === */
 #approvalPanel {
-  position: fixed;
+  position: absolute;
   left: 50%;
-  bottom: 140px;
-  transform: translateX(-50%);
+  bottom: 160px; /* <-- moves it up above bottom bar */
+  transform: translateX(-50%) translateY(60px);
   width: min(92vw, 460px);
   background: rgba(20,24,36,0.96);
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 14px;
-  box-shadow: 0 12px 25px rgba(0,0,0,0.6);
+  box-shadow: 0 8px 25px rgba(0,0,0,0.5);
   padding: 14px;
-  z-index: 12000 !important;   /* 🔥 Always above everything */
+  z-index: 6000;
   transition: all 0.28s ease;
   opacity: 0;
   pointer-events: none;
 }
-
 
 #approvalPanel.show {
   opacity: 1;
@@ -849,17 +848,44 @@ function clearPreview(){
 
 function buildPreviewRoute(startLL, endLL, labelText){
   clearPreview();
+  
+  // 1. Show Panel Instantly (Don't wait for server)
+  approvalTitle.textContent = "Start navigation?";
+  approvalSubtitle.textContent = labelText || "Destination";
+  approvalDistance.textContent = "Calculating...";
+  approvalDuration.textContent = "--";
+  approvalPanel.classList.add("show");
+  
+  // 2. Set Preview State Immediately (So "Start" button works even if map is loading)
+  preview.active = true;
+  preview.start = L.latLng(startLL);
+  preview.end = L.latLng(endLL);
+  preview.destLabel = labelText || "Selected destination";
+
+  // 3. Fetch Route Data in Background
   const router = L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' });
   const wp = [{ latLng: L.latLng(startLL) }, { latLng: L.latLng(endLL) }];
+  
   router.route(wp, (err, routesResp) => {
-    if (err || !routesResp || !routesResp[0]) { console.warn("Preview routing failed:", err); return; }
+    // If API fails, just stop here. The panel is already visible, so the user can still click Start.
+    if (err || !routesResp || !routesResp[0]) { 
+        console.warn("Preview routing failed:", err); 
+        approvalDistance.textContent = "Ready";
+        return; 
+    }
+    
     const r = routesResp[0];
-    preview.active = true; preview.osrmRoute = r; preview.start = L.latLng(startLL);
-    preview.end = L.latLng(endLL); preview.destLabel = labelText || "Selected destination";
+    preview.osrmRoute = r;
+    
+    // Draw the preview line (Blue Path)
     preview.group = L.layerGroup().addTo(map);
-    preview.polyline = L.polyline(r.coordinates.map(c => [c.lat, c.lng]), { color:'#4DA6FF', weight:5, opacity:0.9 }).addTo(preview.group);
-    approvalTitle.textContent = "Start navigation?";
-    approvalSubtitle.textContent = preview.destLabel;
+    preview.polyline = L.polyline(r.coordinates.map(c => [c.lat, c.lng]), { 
+        color:'#4DA6FF', 
+        weight:5, 
+        opacity:0.9 
+    }).addTo(preview.group);
+    
+    // Update labels with actual numbers once loaded
     approvalDistance.textContent = fmtKm(r.summary.totalDistance);
     approvalDuration.textContent = fmtMin(r.summary.totalTime);
   });
@@ -1076,10 +1102,31 @@ if (navigator.geolocation){
     maybeRepeatCurrentStep();
     // ===============================
     // FIXED COMPASS BUTTON BEHAVIOR
-    // ===============================
-
+    // ==============================
   }, console.warn, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
+const compassBtn = document.getElementById("compass-btn");
+
+compassBtn.onclick = () => {
+    compassMode = (compassMode + 1) % 2;
+
+    if (compassMode === 0) {
+        autoRotation = false;
+        follow = true;
+        autoCenter = true;
+        map.setBearing(0, { animate: true });
+        compassBtn.style.background = "#ff1212";
+        compassBtn.innerHTML = "⬆️";
+    } else {
+        autoRotation = true;
+        follow = true;
+        autoCenter = true;
+        rotateTowardRoute();
+        compassBtn.style.background = "#00b36b";
+        compassBtn.innerHTML = "🧭";
+    }
+};
+
 // keep map centered automatically if follow mode is ON
 setInterval(() => {
     if (follow && autoCenter && userMarker && !userHasTouchedMap) {
@@ -1103,27 +1150,6 @@ function rotateTowardRoute() {
 
     map.setBearing((angle + 360) % 360, { animate: true, duration: 800 });
 }
-const compassBtn = document.getElementById("compass-btn");
-
-compassBtn.onclick = () => {
-    compassMode = (compassMode + 1) % 2;
-
-    if (compassMode === 0) {
-        autoRotation = false;
-        follow = true;
-        autoCenter = true;
-        map.setBearing(0, { animate: true, duration: 800 });
-        compassBtn.style.background = "#ff1212";
-        compassBtn.innerText = "⬆️";
-    } else {
-        autoRotation = true;
-        follow = true;
-        autoCenter = true;
-        rotateTowardRoute();
-        compassBtn.style.background = "#00b36b";
-        compassBtn.innerText = "🧭";
-    }
-};
 
 // === Speed Limit (Overpass API - Real Data Only) ===
 let lastSpeedLimit = null;
@@ -1888,14 +1914,24 @@ async function createRoute(start, end, color, marker = null, index = null) {
   };
 
 rc.on("routesfound", async e => {
+
+    if (!e.routes || !e.routes[0]) return;
+
     const r = e.routes[0];
+
+    // Reset step system SAFELY
+    currentStepIndex = 0;
+    announcedSteps.clear();
+
+    // Prepare coordinate list
     const coords = r.coordinates.map(c => ({ lat: c.lat, lng: c.lng }));
-    
-    // Pre-fetch elevations for the whole path to ensure they align
+
+    // Fetch elevations safely
     const elevs = await getElevations(coords);
 
     content.innerHTML = "";
     const steps = [];
+
 
     // ============================================================
     // ✅ UNIFIED LOOP: Handle ALL steps (Start to Finish) together
@@ -2039,28 +2075,24 @@ rc.on("routesfound", async e => {
 
 }
 
-map.on('click', e => {
-  if (!mapClickEnabled) return; // << prevent accidental taps unless button activated
-  mapClickEnabled = false;
+map.on("click", async e => {
 
-  // Reset button UI once clicked
-  mapSelectBtn.style.background = "#ffcc00";
-  mapSelectBtn.style.color = "#000";
-  mapSelectBtn.textContent = "🖱 ";
+    if (!mapClickEnabled) return;
 
-  const latlng = e.latlng;
-  let startPoint = null;
-  if (routes.length > 0) {
-    const lastRoute = routes[routes.length - 1];
-    const lastSteps = lastRoute.steps;
-    if (lastSteps.length > 0) { 
-      const lastStep = lastSteps[lastSteps.length - 1]; 
-      startPoint = L.latLng(lastStep.lat, lastStep.lng); 
-    }
-  }
-  if (!startPoint) startPoint = userMarker ? userMarker.getLatLng() : map.getCenter();
-  openPreviewTo(latlng, "Pinned location", true);
-  preview.start = startPoint;
+    mapClickEnabled = false;
+    mapSelectBtn.style.background = "#ffcc00";
+    mapSelectBtn.textContent = "Select";
+
+    const latlng = e.latlng;
+
+    const startPoint = userMarker 
+        ? userMarker.getLatLng() 
+        : map.getCenter();
+
+    await openPreviewTo(latlng, "Pinned location", true);
+
+    preview.start = startPoint;
+
 });
 
 function rebuildRoutes() {
@@ -2386,7 +2418,7 @@ function deg2rad(deg) {
   return deg * (Math.PI / 180);
 }
 async function getSearchResults(query) {
-
+    return requestId === gmSearchRequestId ? final.slice(0, RESULT_LIMIT) : [];
     const center = userMarker ? userMarker.getLatLng() : map.getCenter();
     const encoded = encodeURIComponent(query);
 

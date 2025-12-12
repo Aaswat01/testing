@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Test4 </title>
+<title>Test5 </title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -964,7 +964,7 @@ approvalStartBtn.addEventListener("click", () => {
     
   waypointMarkers.push(destMarker); waypoints.push(preview.end);
   const endLL = preview.end; clearPreview();
-  createRoute(waypoints[waypoints.length - 2], endLL, colors[routes.length % colors.length], destMarker);
+  createRoute(waypoints[waypoints.length - 1], endLL, colors[routes.length % colors.length], destMarker);
 });
 approvalCancelBtn.addEventListener("click", clearPreview);
 

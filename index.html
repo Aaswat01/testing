@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Test6 </title>
+<title>Test7 </title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -1751,8 +1751,8 @@ async function safeReroute(route, currentLL) {
     const destLL = L.latLng(lastStep.lat, lastStep.lng);
 
     // 2️⃣ Remove only the OLD line + step layers
-    //try { map.removeControl(route.rc); } catch {}
-    //try { map.removeLayer(route.group); } catch {}
+    try { map.removeControl(route.rc); } catch {}
+    try { map.removeLayer(route.group); } catch {}
 
     // 3️⃣ Create NEW group for rerouted line
     const newGroup = L.layerGroup().addTo(map);

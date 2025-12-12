@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Test9 </title>
+<title>Test10 </title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -1586,7 +1586,7 @@ async function adaptiveAIDashboard(latlng, heading) {
         const isMoving = currentSpeed > 5; // km/h threshold
 
         // Reroute Condition
-        if (offDist > 45 && isMoving && !route._isRerouting) {
+        if (offDist > 25 && isMoving && !route._isRerouting) {
 
             console.warn(`👉 Off-route detected (${offDist.toFixed(1)}m) — recalculating route...`);
 

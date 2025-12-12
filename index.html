@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Test2 </title>
+<title>Test3 </title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -2125,7 +2125,7 @@ function rebuildRoutes() {
   waypoints.push(...validWaypoints); waypointMarkers.push(...validMarkers);
   routes.forEach(r => { try { map.removeControl(r.rc); } catch {} try { map.removeLayer(r.group); } catch {} });
   routes = []; document.getElementById("routePanel").innerHTML = "";
-  if (waypoints.length < 1) return;
+  if (waypoints.length < 2) return;
   for (let i = 1; i < waypoints.length; i++) {
     createRoute(waypoints[i-1], waypoints[i], colors[(i-1)%colors.length], waypointMarkers[i-1], i-1);
   }

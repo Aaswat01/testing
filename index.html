@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>reTest10 </title>
+<title>Test11/w</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -870,6 +870,17 @@ function clearPreview(){
   preview = { active:false, group:null, polyline:null, osrmRoute:null, start:null, end:null, destLabel:"", tempMarker:null };
   approvalPanel.classList.remove("show");
 }
+// ==============================
+// SINGLE SHARED OSRM ROUTER
+// ==============================
+const OSRM_ROUTER = L.Routing.osrmv1({
+  serviceUrl: "https://router.project-osrm.org/route/v1",
+  routingOptions: {
+    alternatives: false,   // 🔥 ACTUALLY DISABLED
+    steps: true,
+    overview: false
+  }
+});
 
 function buildPreviewRoute(startLL, endLL, labelText){
   clearPreview();
@@ -888,10 +899,9 @@ function buildPreviewRoute(startLL, endLL, labelText){
   preview.destLabel = labelText || "Selected destination";
 
   // 3. Fetch Route Data in Background
-  const router = L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' });
   const wp = [{ latLng: L.latLng(startLL) }, { latLng: L.latLng(endLL) }];
   
-  router.route(wp, (err, routesResp) => {
+  OSRM_ROUTER.route(wp, (err, routesResp) => {
     // If API fails, just stop here. The panel is already visible, so the user can still click Start.
     if (err || !routesResp || !routesResp[0]) { 
         console.warn("Preview routing failed:", err); 
@@ -964,7 +974,7 @@ approvalStartBtn.addEventListener("click", () => {
     
   waypointMarkers.push(destMarker); waypoints.push(preview.end);
   const endLL = preview.end; clearPreview();
-  createRoute(waypoints[waypoints.length - 1], endLL, colors[routes.length % colors.length], destMarker);
+  createRoute(waypoints[waypoints.length - 2], endLL, colors[routes.length % colors.length], destMarker);
 });
 approvalCancelBtn.addEventListener("click", clearPreview);
 
@@ -1586,7 +1596,7 @@ async function adaptiveAIDashboard(latlng, heading) {
         const isMoving = currentSpeed > 5; // km/h threshold
 
         // Reroute Condition
-        if (offDist > 25 && isMoving && !route._isRerouting) {
+        if (offDist > 75 && isMoving && !route._isRerouting) {
 
             console.warn(`👉 Off-route detected (${offDist.toFixed(1)}m) — recalculating route...`);
 
@@ -1596,7 +1606,7 @@ async function adaptiveAIDashboard(latlng, heading) {
             triggerReroute(latlng, route);
 
             // Cooldown to avoid reroute loops
-            setTimeout(() => route._isRerouting = false, 9000);
+            setTimeout(() => route._isRerouting = false, 20000);
         }
     }
     // 🆕 Check for upcoming step announcements
@@ -1752,18 +1762,14 @@ async function safeReroute(route, currentLL) {
 
     // 2️⃣ Remove only the OLD line + step layers
     try { map.removeControl(route.rc); } catch {}
-    try { map.removeLayer(route.group); } catch {}
+    try { route.group.clearLayers();} catch {}
 
     // 3️⃣ Create NEW group for rerouted line
     const newGroup = L.layerGroup().addTo(map);
     route.group = newGroup; // replace only this route’s group
 
     // 4️⃣ Generate new route using OSRM
-    const router = L.Routing.osrmv1({
-        serviceUrl: "https://router.project-osrm.org/route/v1"
-    });
-
-    router.route(
+    OSRM_ROUTER.route(
         [{ latLng: currentLL }, { latLng: destLL }],
         async (err, result) => {
             if (err || !result || !result[0]) {
@@ -1775,7 +1781,7 @@ async function safeReroute(route, currentLL) {
 
             // 5️⃣ Replace route.rc with new control
             route.rc = L.Routing.control({
-                router,
+                router: OSRM_ROUTER,
                 waypoints: [currentLL, destLL],
                 show: false,
                 addWaypoints: false,
@@ -1887,7 +1893,7 @@ async function createRoute(start, end, color, marker = null, index = null) {
 
   const rc = L.Routing.control({
     waypoints: [start, end],
-    router: L.Routing.osrmv1({ serviceUrl: "https://router.project-osrm.org/route/v1" }),
+    router: OSRM_ROUTER,
     show: false, addWaypoints: false, createMarker: () => null,
     lineOptions: { styles: [{ color: routeColor, weight: 5, opacity: 0.9 }] }
   }).addTo(map);
@@ -2125,7 +2131,7 @@ function rebuildRoutes() {
   waypoints.push(...validWaypoints); waypointMarkers.push(...validMarkers);
   routes.forEach(r => { try { map.removeControl(r.rc); } catch {} try { map.removeLayer(r.group); } catch {} });
   routes = []; document.getElementById("routePanel").innerHTML = "";
-  if (waypoints.length < 1) return;
+  if (waypoints.length < 2) return;
   for (let i = 1; i < waypoints.length; i++) {
     createRoute(waypoints[i-1], waypoints[i], colors[(i-1)%colors.length], waypointMarkers[i-1], i-1);
   }
@@ -2755,7 +2761,7 @@ micBtn.onclick = async () => {
   try {
     await navigator.mediaDevices.getUserMedia({ audio: true });
     const recog = new webkitSpeechRecognition(); recog.lang='en-US'; recog.interimResults=false; recog.maxAlternatives=1;
-    micBtn.textContent='🎙️ ...'; recog.start();
+    micBtn.textContent='🎙️ Listening...'; recog.start();
     recog.onresult = (e) => { const text=e.results[0][0].transcript; input.value=text; input.dispatchEvent(new Event('input')); };
     recog.onerror = () => { micBtn.textContent='🎤'; };
     recog.onend = () => { micBtn.textContent='🎤'; };

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Test11/w</title>
+<title>Test12 </title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -757,25 +757,61 @@ let compassMode = 0;
 let activeRequests = 0;
 const MAX_REQUESTS = 6;     // safe limit
 const REQUEST_DELAY = 120;  // ms delay between API queues
+// Add cooldown tracking for reroute
+let lastRerouteTime = 0;
+const REROUTE_COOLDOWN = 15000; // 15 seconds
+const requestQueue = [];
+let isProcessingQueue = false;
 
-async function safeFetch(url) {
-    // Wait if too many requests running
-    while (activeRequests >= MAX_REQUESTS) {
-        await new Promise(r => setTimeout(r, REQUEST_DELAY));
-    }
-
-    activeRequests++;
-    try {
-        const res = await fetch(url);
-        return res;
-    } catch (e) {
-        console.warn("Fetch failed:", e);
-        return null;
-    } finally {
-        activeRequests--;
-    }
+async function safeFetch(url, retries = 2) {
+    return new Promise((resolve, reject) => {
+        requestQueue.push({ url, retries, resolve, reject });
+        processQueue();
+    });
 }
 
+async function processQueue() {
+    if (isProcessingQueue || requestQueue.length === 0) return;
+    
+    isProcessingQueue = true;
+    
+    while (requestQueue.length > 0 && activeRequests < MAX_REQUESTS) {
+        const task = requestQueue.shift();
+        activeRequests++;
+        
+        try {
+            const res = await fetch(task.url);
+            
+            if (res.status === 504 || res.status === 429) {
+                // Retry after delay
+                if (task.retries > 0) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    task.retries--;
+                    requestQueue.unshift(task); // Put back at front
+                } else {
+                    task.reject(new Error(`Failed after retries: ${res.status}`));
+                }
+            } else {
+                task.resolve(res);
+            }
+        } catch (e) {
+            if (task.retries > 0) {
+                task.retries--;
+                requestQueue.unshift(task);
+            } else {
+                task.reject(e);
+            }
+        } finally {
+            activeRequests--;
+        }
+    }
+    
+    isProcessingQueue = false;
+    
+    if (requestQueue.length > 0) {
+        setTimeout(processQueue, REQUEST_DELAY);
+    }
+}
 const UI = {
   aiBox: document.getElementById("ai-tip"),
   speedEl: document.getElementById("speed"),
@@ -871,17 +907,29 @@ function clearPreview(){
   approvalPanel.classList.remove("show");
 }
 // ==============================
-// SINGLE SHARED OSRM ROUTER
+// SINGLE SHARED OSRM ROUTER - FIXED
 // ==============================
 const OSRM_ROUTER = L.Routing.osrmv1({
-  serviceUrl: "https://router.project-osrm.org/route/v1",
-  routingOptions: {
-    alternatives: false,   // 🔥 ACTUALLY DISABLED
-    steps: true,
-    overview: false
-  }
+  serviceUrl: "https://router.project-osrm.org/route/v1/driving",  // ✅ MUST include /driving
+  timeout: 15000,  // 15 second timeout
+  profile: 'driving'
 });
 
+// ✅ CRITICAL: Override the buildRouteUrl method to fix the /undefined/ bug
+OSRM_ROUTER.buildRouteUrl = function(waypoints, options) {
+  const locs = waypoints.map(wp => `${wp.latLng.lng},${wp.latLng.lat}`).join(';');
+  
+  // Force correct parameters
+  const params = new URLSearchParams({
+    overview: 'full',
+    steps: true,
+    geometries: 'polyline',
+    alternatives: false  // ✅ Explicitly disable
+  });
+  
+  // ✅ Return proper URL with /driving/ profile
+  return `https://router.project-osrm.org/route/v1/driving/${locs}?${params.toString()}`;
+};
 function buildPreviewRoute(startLL, endLL, labelText){
   clearPreview();
   
@@ -954,7 +1002,14 @@ async function openPreviewTo(latlng, label, addTempMarker = true) {
 
 approvalStartBtn.addEventListener("click", () => {
   if (!preview.active || !preview.end) return;
+  // ✅ Cancel any pending preview route request
+  if (preview.rc) {
+    try { map.removeControl(preview.rc); } catch {}
+  }
   // 🆕 Enable auto-rotation toward route when navigation begins
+  if (preview.rc) {
+    try { map.removeControl(preview.rc); } catch {}
+  }
   autoRotation = true;
   rotateTowardRoute();
   follow = true;
@@ -1594,20 +1649,29 @@ async function adaptiveAIDashboard(latlng, heading) {
         /*** 🚨 AUTO REROUTE ENGINE FIX 🚨 ***/
         const offDist = getNearestRouteDistance(latlng, route);
         const isMoving = currentSpeed > 5; // km/h threshold
+        // Add cooldown tracking at top of file with other globals
+        let lastRerouteTime = 0;
+        const REROUTE_COOLDOWN = 15000; // 15 seconds minimum between reroutes
 
         // Reroute Condition
+        // Reroute Condition
         if (offDist > 75 && isMoving && !route._isRerouting) {
-
-            console.warn(`👉 Off-route detected (${offDist.toFixed(1)}m) — recalculating route...`);
-
+            const now = Date.now();
+            
+            // ✅ Prevent spam rerouting
+            if (now - lastRerouteTime < REROUTE_COOLDOWN) {
+                console.log("⏳ Reroute on cooldown, waiting...");
+                return;
+            }
+            
+            lastRerouteTime = now;
+            console.warn(`👉 Off-route detected (${offDist.toFixed(1)}m) – recalculating route...`);
+            
             route._isRerouting = true;
-
-            // Call reroute function using SAME destination
             triggerReroute(latlng, route);
-
-            // Cooldown to avoid reroute loops
+            
             setTimeout(() => route._isRerouting = false, 20000);
-        }
+}
     }
     // 🆕 Check for upcoming step announcements
     checkUpcomingSteps(latlng);

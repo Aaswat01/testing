@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>8</title>
+<title>9</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -2160,8 +2160,10 @@ function createGMArrow(latlng, bearing, typeClass) {
     const arrowEl = document.createElement("div");
     arrowEl.className = "gm-road-arrow";
     arrowEl.innerHTML = `<div class="gm-arrow-icon ${typeClass}"></div>`;
-
-    return L.marker(latlng, {
+    // 🔒 ROAD-RELATIVE ROTATION ONLY (ONE TIME)
+    arrowEl.style.transform = `rotate(${bearing}deg)`;
+    arrowEl.style.transformOrigin = "50% 50%";
+    const marker = L.marker(latlng, {
         interactive: false,
         icon: L.divIcon({
             className: "",
@@ -2170,7 +2172,10 @@ function createGMArrow(latlng, bearing, typeClass) {
             iconAnchor: [12, 12]
         })
     });
+
+    return marker;
 }
+
 
 // ===== Route creation =====
 async function createRoute(start, end, color, marker = null, index = null) {

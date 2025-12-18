@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>9</title>
+<title>10</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -529,52 +529,19 @@ align-items:center;color:#fff;font-size:0.9rem;}
   display: flex;
   align-items: center;
 }
-/* === GOOGLE MAPS STYLE SMART ARROWS === */
-.gm-road-arrow {
-  width: 24px;
-  height: 24px;
-  background: #ffffff;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+
+/* === ROAD DIRECTION FLOW ARROWS (GOOGLE STYLE) === */
+.road-arrow {
+  width: 20px;
+  height: 20px;
+  font-size: 20px;
+  font-weight: 900;
+  color: #00ffcc;
+  text-shadow: 0 0 4px rgba(0,0,0,0.7);
   transform-origin: center center;
-  z-index: 500;
-}
-
-.gm-arrow-icon {
-  width: 16px;
-  height: 16px;
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: contain;
-}
-
-/* --- SMART ARROW TYPES (SVGs) --- */
-/* Straight */
-.gm-arrow-straight {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000000'%3E%3Cpath d='M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z'/%3E%3C/svg%3E");
-}
-/* Slight Left (Curve) */
-.gm-arrow-slight-left {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000000'%3E%3Cpath d='M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z' transform='rotate(45 12 12)'/%3E%3C/svg%3E");
-}
-/* Slight Right (Curve) */
-.gm-arrow-slight-right {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000000'%3E%3Cpath d='M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z' transform='rotate(-45 12 12)'/%3E%3C/svg%3E");
-}
-/* Sharp Left (Turn) */
-.gm-arrow-left {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000000'%3E%3Cpath d='M14 7l-5 5 5 5V7z'/%3E%3C/svg%3E");
-}
-/* Sharp Right (Turn) */
-.gm-arrow-right {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000000'%3E%3Cpath d='M10 17l5-5-5-5v10z'/%3E%3C/svg%3E");
-}
-/* U-Turn */
-.gm-arrow-uturn {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000000'%3E%3Cpath d='M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V6.41l1.29 1.29c.39.39 1.02.39 1.41 0s.39-1.02 0-1.41L9.71 2.29c-.39-.39-1.02-.39-1.41 0L4.29 6.29c-.39.39-.39 1.02 0 1.41s1.02.39 1.41 0L7 6.41V18H6z' transform='rotate(180 12 12)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  user-select: none;
+  line-height: 1;
 }
 
 </style>
@@ -1507,6 +1474,13 @@ function smartStepAdvancement(latlng) {
             fadeOutStepLine(steps[i].lineLayer);
             steps[i].lineLayer = null; // prevent double removal
         }     
+        // 🔥 REMOVE ARROWS FOR COMPLETED STEP
+        if (steps[i].arrows) {
+            steps[i].arrows.forEach(a => {
+                try { map.removeLayer(a); } catch {}
+            });
+            steps[i].arrows = null;
+        }
         if (steps[i].connectorLine) {
             fadeOutStepLine(steps[i].connectorLine, 400);
             steps[i].connectorLine = null;
@@ -1568,6 +1542,17 @@ function cleanupRoute(route) {
   try { map.removeControl(route.rc); } catch {}
   try { map.removeLayer(route.group); } catch {}
   const destIndex = waypointMarkers.length - 1;
+  // 🔥 CLEAN ALL ROAD ARROWS
+  if (route.steps) {
+      route.steps.forEach(s => {
+          if (s.arrows) {
+              s.arrows.forEach(a => {
+                  try { map.removeLayer(a); } catch {}
+              });
+              s.arrows = null;
+          }
+      });
+  }
   if (waypointMarkers[destIndex]) {
     map.removeLayer(waypointMarkers[destIndex]);
     waypointMarkers.splice(destIndex, 1);
@@ -1963,7 +1948,17 @@ async function safeReroute(route, currentLL) {
     // 2️⃣ Remove only the OLD line + step layers
     try { map.removeControl(route.rc); } catch {}
     try { route.group.clearLayers();} catch {}
-
+    // 🔥 CLEAN ALL ROAD ARROWS
+    if (route.steps) {
+        route.steps.forEach(s => {
+            if (s.arrows) {
+                s.arrows.forEach(a => {
+                    try { map.removeLayer(a); } catch {}
+                });
+                s.arrows = null;
+            }
+        });
+    }
     // 3️⃣ Create NEW group for rerouted line
     const newGroup = L.layerGroup().addTo(map);
     route.group = newGroup; // replace only this route’s group
@@ -2013,8 +2008,6 @@ async function safeReroute(route, currentLL) {
                 lat: c.lat,
                 lng: c.lng
             }));
-            // 🧭 rebuild Google-style road arrows after reroute
-            route.roadArrows = addGoogleStyleRoadArrows(coords, newGroup);
 
             // elevation
             const elevs = new Array(coords.length).fill(0);
@@ -2081,102 +2074,97 @@ async function safeReroute(route, currentLL) {
 function triggerReroute(currentLL, route) {
     safeReroute(route, currentLL);
 }
+
 // ===============================
-// GOOGLE MAPS STYLE ARROW ENGINE (SMART TURNS)
+// ROAD ARROW HELPERS (GEOMETRY ONLY)
 // ===============================
 
-// 1. Calculate bearing between two points
-function roadBearing(lat1, lng1, lat2, lng2) {
-    const y = Math.sin(lng2 - lng1) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) -
-              Math.sin(lat1) * Math.cos(lat2) * Math.cos(lng2 - lng1);
-    const brng = Math.atan2(y, x);
-    return (brng * 180 / Math.PI + 360) % 360; 
+// bearing between two LatLngs
+function roadBearing(a, b) {
+    return Math.atan2(
+        b.lng - a.lng,
+        b.lat - a.lat
+    ) * 180 / Math.PI;
 }
 
-// 2. Normalize angle difference to -180 to +180
-function normalizeAngle(angle) {
-    while (angle <= -180) angle += 360;
-    while (angle > 180) angle -= 360;
-    return angle;
-}
-
-// 3. Main Arrow Engine
-function addGoogleStyleRoadArrows(coords, group) {
-    const arrows = [];
-    const ARROW_SPACING = 60; // Slightly closer for better turn visibility
-    let distAccumulator = ARROW_SPACING; 
-
-    // Helper to get radian coords
-    const toRad = (d) => d * Math.PI / 180;
-
-    for (let i = 0; i < coords.length - 1; i++) {
-        const p1 = L.latLng(coords[i]);
-        const p2 = L.latLng(coords[i+1]);
-        
-        const segmentDist = p1.distanceTo(p2);
-        distAccumulator += segmentDist;
-
-        if (distAccumulator >= ARROW_SPACING) {
-            
-            // A. Base Bearing (Current Segment)
-            const lat1 = toRad(p1.lat), lng1 = toRad(p1.lng);
-            const lat2 = toRad(p2.lat), lng2 = toRad(p2.lng);
-            const baseBearing = roadBearing(lat1, lng1, lat2, lng2);
-
-            // B. Look Ahead for Turns (Next Segment)
-            let turnAngle = 0;
-            if (i < coords.length - 2) {
-                const p3 = L.latLng(coords[i+2]);
-                const lat3 = toRad(p3.lat), lng3 = toRad(p3.lng);
-                const nextBearing = roadBearing(lat2, lng2, lat3, lng3);
-                turnAngle = normalizeAngle(nextBearing - baseBearing);
-            }
-
-            // C. Determine Icon based on Turn Angle  
-            const arrowClass = getArrowClassByAngle(turnAngle);
-
-            // D. Create Marker
-            const arrow = createGMArrow(p1, baseBearing, arrowClass).addTo(group);
-            
-            arrows.push({
-                marker: arrow,
-                baseBearing: baseBearing
-            });
-
-            distAccumulator = 0; 
-        }
-    }
-    return arrows;
-}
-
-// 4. Smart Icon Selector
-function getArrowClassByAngle(angle) {
-    // Thresholds for turn types
-    return "gm-arrow-straight";                   // Straight
-}
-// 5. Create Marker
-function createGMArrow(latlng, bearing, typeClass) {
-    const arrowEl = document.createElement("div");
-    arrowEl.className = "gm-road-arrow";
-    arrowEl.innerHTML = `<div class="gm-arrow-icon ${typeClass}"></div>`;
-    // 🔒 ROAD-RELATIVE ROTATION ONLY (ONE TIME)
-    arrowEl.style.transform = `rotate(${bearing}deg)`;
-    arrowEl.style.transformOrigin = "50% 50%";
+// create a single arrow marker aligned ONCE
+function createRoadArrow(latlng, bearing, symbol) {
     const marker = L.marker(latlng, {
         interactive: false,
         icon: L.divIcon({
             className: "",
-            html: arrowEl,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
+            html: `<div class="road-arrow">${symbol}</div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
         })
+    });
+
+    // rotate ONCE to match road direction
+    marker.on("add", () => {
+        const el = marker.getElement();
+        if (el) el.style.transform = `rotate(${bearing}deg)`;
     });
 
     return marker;
 }
 
+// ======================================
+// ADD FLOW ARROWS ALONG A POLYLINE SEGMENT
+// ======================================
+function addArrowsAlongSegment(latlngs, group) {
+    const arrows = [];
+    const SPACING_METERS = 45;
+    let lastPlaced = null;
+    let lastBearing = null;
+    for (let i = 1; i < latlngs.length - 1; i++) {
+        const p0 = latlngs[i - 1];
+        const p1 = latlngs[i];
+        const p2 = latlngs[i + 1];
+        if (lastPlaced && p1.distanceTo(lastPlaced) < SPACING_METERS) continue;
+        const b1 = roadBearing(p0, p1);
+        const b2 = roadBearing(p1, p2);
+        const delta = normalizeAngle(b2 - b1);
+        // avoid repeating same arrow on straight roads
+        if (lastBearing !== null && Math.abs(delta) < 8) continue;
+        const type = arrowByTurn(delta);
+        const symbol = arrowSymbol(type);
+        const arrow = createRoadArrow(p1, b2, symbol).addTo(group);
+        arrows.push(arrow);
+        lastPlaced = p1;
+        lastBearing = b2;
+    }
 
+    return arrows;
+}
+// ===============================
+// TURN CLASSIFICATION HELPERS
+// ===============================
+function normalizeAngle(a) {
+    a = ((a + 180) % 360) - 180;
+    return a;
+}
+
+function arrowByTurn(delta) {
+    const abs = Math.abs(delta);
+
+    if (abs < 10) return "straight";
+    if (abs < 30) return delta > 0 ? "slight-right" : "slight-left";
+    if (abs < 120) return delta > 0 ? "right" : "left";
+    return "uturn";
+}
+
+function arrowSymbol(type) {
+    switch (type) {
+        case "straight": return "➜";
+        case "slight-left": return "↖";
+        case "slight-right": return "↗";
+        case "left": return "⬅";
+        case "right": return "➡";
+        case "uturn": return "⤴";
+        default: return "➜";
+    }
+}
+   
 // ===== Route creation =====
 async function createRoute(start, end, color, marker = null, index = null) {
   const routeIndex = index !== null ? index : routes.length;
@@ -2254,15 +2242,11 @@ rc.on("routesfound", async e => {
 
     // Prepare coordinate list
     const coords = r.coordinates.map(c => ({ lat: c.lat, lng: c.lng }));
-    // 🧭 ADD GOOGLE MAPS STYLE ROAD ARROWS (NO STEP DEPENDENCY)
-    const roadArrows = addGoogleStyleRoadArrows(coords, group);
-
     // Fetch elevations safely
     const elevs = new Array(coords.length).fill(0);
 
     content.innerHTML = "";
     const steps = [];
-
 
     // ============================================================
     // ✅ UNIFIED LOOP: Handle ALL steps (Start to Finish) together
@@ -2288,6 +2272,20 @@ rc.on("routesfound", async e => {
         weight: 5,
         opacity: 0.8
       }).addTo(group);
+      // 🧭 ADD ROAD DIRECTION ARROWS FOR THIS STEP
+      const stepLatLngs = segmentCoords.map(c => L.latLng(c[0], c[1]));
+      // 🔥 STEP START ARROW (TURN INDICATOR)
+      if (stepLatLngs.length >= 2) {
+          const bStart = roadBearing(stepLatLngs[0], stepLatLngs[1]);
+          const startArrow = createRoadArrow(
+              stepLatLngs[0],
+              bStart,
+              "➜"
+          ).addTo(group);
+
+          stepArrows.unshift(startArrow);
+      }
+      const stepArrows = addArrowsAlongSegment(stepLatLngs, group);
 
       // 3. Create the HTML Box
       const item = document.createElement("div");
@@ -2311,6 +2309,7 @@ rc.on("routesfound", async e => {
         element: item,
         distance: s.distance,
         lineLayer: stepLine,
+        arrows: stepArrows,   // 🔥 store arrows
         translated: false
       };
       steps.push(stepObj);

@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>2</title>
+<title>3</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -542,14 +542,14 @@ align-items:center;color:#fff;font-size:0.9rem;}
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
   transform-origin: center center;
   z-index: 500;
-  transform-origin: center center !important;
+  transform-origin: center center;
   will-change: transform;
-  filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.4));
+  filter: drop-shadow(0px 1px 2px rgba(0,0,0,0.5));
   transition: transform 0.2s ease-out; /* Smooths out the arrow transition */
 }
 .gm-road-arrow-container {
+    background: transparent !important;
     border: none !important;
-    background: none !important;
     pointer-events: none;
 }
 .leaflet-rotate-pane .gm-road-arrow {
@@ -1739,26 +1739,33 @@ function triggerReroute(currentLL, route) {
 }
 function addGoogleStyleRoadArrows(coords, group) {
     if (!coords || coords.length < 2) return;
-    
-    // We clear existing arrows before adding new ones
     group.clearLayers();
 
-    // Distance between arrows (approx every 15-20 points to avoid clutter)
+    // Spacing: Place an arrow every 15 coordinate points
     const step = 15; 
-    
+
     for (let i = 0; i < coords.length - 1; i += step) {
         const p1 = coords[i];
         const p2 = coords[i + 1];
-        
-        // Calculate the bearing of the road segment
-        const bearing = L.GeometryUtil.bearing(p1, p2);
-        
-        // Use a DivIcon with a specific class 'ignore-map-rotation'
+
+        // 1. Calculate the exact angle of the road between these two points
+        const lat1 = p1.lat * Math.PI / 180;
+        const lat2 = p2.lat * Math.PI / 180;
+        const lon1 = p1.lng * Math.PI / 180;
+        const lon2 = p2.lng * Math.PI / 180;
+        const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+        const x = Math.cos(lat1) * Math.sin(lat2) -
+                  Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+        const bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+
+        // 2. Create the Arrow Icon
+        // We apply the bearing directly to the style. 
+        // 'rotationAngle' is added for compatibility with the rotate plugin.
         const arrowIcon = L.divIcon({
             className: 'gm-road-arrow-container',
             html: `
-                <div class="gm-road-arrow" style="transform: rotate(${bearing}deg);">
-                    <svg viewBox="0 0 24 24" width="24" height="24">
+                <div class="gm-road-arrow" style="transform: rotate(${bearing}deg); width:24px; height:24px;">
+                    <svg viewBox="0 0 24 24" width="24" height="24" style="display:block;">
                         <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z" fill="white" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
                     </svg>
                 </div>
@@ -1770,10 +1777,10 @@ function addGoogleStyleRoadArrows(coords, group) {
         const marker = L.marker(p1, { 
             icon: arrowIcon,
             interactive: false,
-            // This is the key for the leaflet-rotate plugin:
-            rotationAngle: bearing 
+            rotationAngle: bearing, // Helps the rotate plugin understand intent
+            rotationOrigin: 'center center'
         });
-        
+
         group.addLayer(marker);
     }
 }

@@ -1,10 +1,9 @@
 <!DOCTYPE html>
-<!DOCTYPE html>
-<html lang="en"> 
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>4</title>
+<title>5</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -530,6 +529,27 @@ align-items:center;color:#fff;font-size:0.9rem;}
   display: flex;
   align-items: center;
 }
+/* === GOOGLE MAPS STYLE SMART ARROWS === */
+.gm-road-arrow {
+  width: 24px;
+  height: 24px;
+  background: #ffffff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  transform-origin: center center;
+  transform: none !important;   /* 🔒 LOCK */
+}
+
+.gm-arrow-icon {
+  width: 16px;
+  height: 16px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
 
 /* --- SMART ARROW TYPES (SVGs) --- */
 /* Straight */
@@ -692,7 +712,6 @@ align-items:center;color:#fff;font-size:0.9rem;}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js"></script>
 <script src="leaflet-rotate-src.js"></script>
 <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-<script src="https://unpkg.com/leaflet-polylinedecorator@1.7.0/dist/leaflet.polylineDecorator.min.js"></script>
 <script>
 
 // ==============================
@@ -785,7 +804,6 @@ let compassMode = 0;
 // GLOBAL API LOAD CONTROLLER
 // Prevent too many API calls
 // ==========================
-let suppressOffRouteCheckUntil = 0;
 let activeRequests = 0;
 const MAX_REQUESTS = 6;     // safe limit
 const REQUEST_DELAY = 120;  // ms delay between API queues
@@ -930,31 +948,6 @@ function fmtKm(m){ return (m/1000).toFixed(m>=10000 ? 0 : 1) + " km"; }
 function fmtMin(s){
   const m = Math.round(s/60); if (m < 60) return m + " min";
   const h = Math.floor(m/60), mm = m%60; return `${h} hr ${mm?mm+" min":""}`.trim();
-}
-function addStaticRouteArrows(polyline, group) {
-    if (!polyline) return null;
-
-    const decorator = L.polylineDecorator(polyline, {
-        patterns: [
-            {
-                offset: 25,
-                repeat: 80,
-                symbol: L.Symbol.arrowHead({
-                    pixelSize: 10,
-                    polygon: false,
-                    pathOptions: {
-                        stroke: true,
-                        color: "#ffffff",
-                        weight: 2,
-                        opacity: 0.9
-                    }
-                })
-            }
-        ]
-    });
-
-    decorator.addTo(group);
-    return decorator;
 }
 
 function clearPreview(){
@@ -1256,7 +1249,6 @@ if (navigator.geolocation){
 const compassBtn = document.getElementById("compass-btn");
 
 compassBtn.onclick = () => {
-  suppressOffRouteCheckUntil = Date.now() + 2000;
     compassMode = (compassMode + 1) % 2;
 
     if (compassMode === 0) {
@@ -1522,10 +1514,6 @@ function smartStepAdvancement(latlng) {
     }   
     // Update current step
     currentStepIndex = newStepIndex;
-    // ✅ FORCE ROUTE TO FACE UP AFTER STEP CHANGE
-    if (autoRotation) {
-        requestAnimationFrame(() => rotateTowardRoute());
-    }
     announcedSteps.clear(); // Reset announcements 
     // 3. 🔥 NEW: Force Map to Rotate Upwards for the New Step
     if (autoRotation) {
@@ -1730,6 +1718,43 @@ function triggerReroute(currentLL, route) {
 
     safeReroute(route, currentLL, destLL); 
 }
+function addGoogleStyleRoadArrows(coords, group) {
+    const arrows = [];
+
+    const SPACING = 30;        // meters between arrows
+    const ANGLE_TRIGGER = 5;   // detect slight curves
+
+    let lastPlaced = null;
+    let lastBearing = null;
+
+    for (let i = 1; i < coords.length - 1; i++) {
+        const p0 = L.latLng(coords[i - 1]);
+        const p1 = L.latLng(coords[i]);
+        const p2 = L.latLng(coords[i + 1]);
+
+        if (lastPlaced && p1.distanceTo(lastPlaced) < SPACING) continue;
+
+        const b1 = roadBearing(p0, p1);
+        const b2 = roadBearing(p1, p2);
+        const delta = normalizeAngle(b2 - b1);
+
+        if (lastBearing !== null && Math.abs(delta) < ANGLE_TRIGGER) continue;
+
+        const symbol = gmArrowByDelta(delta);
+        const arrow = createGMArrow(p1, symbol).addTo(group);
+
+        arrows.push({
+            marker: arrow,
+            baseBearing: b2
+        });
+
+        lastPlaced = p1;
+        lastBearing = b2;
+    }
+
+    return arrows;
+}
+
 // ===== Main AI loop =====
 async function adaptiveAIDashboard(latlng, heading) {
   const currentSpeed = calculateGPSSpeed(latlng);
@@ -1766,7 +1791,7 @@ async function adaptiveAIDashboard(latlng, heading) {
 
         // Reroute Condition
         // Reroute Condition
-        if (offDist > 75 && isMoving && !route._isRerouting && Date.now() > suppressOffRouteCheckUntil) {
+        if (offDist > 75 && isMoving && !route._isRerouting) {
             const now = Date.now();
             
             // ✅ Prevent spam rerouting
@@ -2059,6 +2084,24 @@ function triggerReroute(currentLL, route) {
 // ===============================
 // GOOGLE MAPS STYLE ARROW ENGINE (SMART TURNS)
 // ===============================
+
+// 1. Calculate bearing between two points
+function roadBearing(lat1, lng1, lat2, lng2) {
+    const y = Math.sin(lng2 - lng1) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) -
+              Math.sin(lat1) * Math.cos(lat2) * Math.cos(lng2 - lng1);
+    const brng = Math.atan2(y, x);
+    return (brng * 180 / Math.PI + 360) % 360; 
+}
+
+// 2. Normalize angle difference to -180 to +180
+function normalizeAngle(angle) {
+    while (angle <= -180) angle += 360;
+    while (angle > 180) angle -= 360;
+    return angle;
+}
+
+// 3. Main Arrow Engine
 function addGoogleStyleRoadArrows(coords, group) {
     const arrows = [];
     const ARROW_SPACING = 60; // Slightly closer for better turn visibility
@@ -2105,6 +2148,37 @@ function addGoogleStyleRoadArrows(coords, group) {
         }
     }
     return arrows;
+}
+
+// 4. Smart Icon Selector
+function getArrowClassByAngle(angle) {
+    // Thresholds for turn types
+    return "gm-arrow-straight";                   // Straight
+}
+
+// 5. Create Marker
+function createGMArrow(latlng, bearing, typeClass) {
+    const arrowEl = document.createElement("div");
+    arrowEl.className = "gm-road-arrow";
+    arrowEl.innerHTML = `<div class="gm-arrow-icon ${typeClass}"></div>`;
+
+    const marker = L.marker(latlng, {
+        interactive: false,
+        icon: L.divIcon({
+            className: "",
+            html: arrowEl,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        })
+    });
+
+    // store original road bearing
+    marker._gmBaseBearing = bearing;
+    marker._gmArrowEl = arrowEl;
+    // initial rotation (before any map rotation)
+    arrowEl.style.transform = `rotate(${bearing}deg)`;
+    arrowEl.style.willChange = "transform";
+    return marker;
 }
 
 // ===== Route creation =====
@@ -2181,21 +2255,11 @@ rc.on("routesfound", async e => {
     // Reset step system SAFELY
     currentStepIndex = 0;
     announcedSteps.clear();
-    // ✅ Ensure rerouted path faces up
-    if (autoRotation) {
-        setTimeout(() => rotateTowardRoute(), 400);
-    }
 
     // Prepare coordinate list
     const coords = r.coordinates.map(c => ({ lat: c.lat, lng: c.lng }));
     // 🧭 ADD GOOGLE MAPS STYLE ROAD ARROWS (NO STEP DEPENDENCY)
-    const routeLine = L.polyline(coords.map(c => [c.lat, c.lng]), {
-        color: routeColor,
-        weight: 5,
-        opacity: 0.9
-    }).addTo(group);
-
-    const arrowDecorator = addStaticRouteArrows(routeLine, group);
+    const roadArrows = addGoogleStyleRoadArrows(coords, group);
 
     // Fetch elevations safely
     const elevs = new Array(coords.length).fill(0);
@@ -2405,15 +2469,12 @@ document.getElementById("map-toggle").addEventListener("click", () => {
 });
 
 document.getElementById("locate-btn").onclick = () => {
-    suppressOffRouteCheckUntil = Date.now() + 2000; // 🛑 block reroute for 2s
     follow = true;
     autoCenter = true;
-    userHasTouchedMap = false;
-    if (userMarker) {
-        map.panTo(userMarker.getLatLng(), { animate:true });
-    }
+    userHasTouchedMap = false; 
+    // NOTE: Do NOT enable autoRotation here.
+    map.flyTo(userMarker.getLatLng(), 19, { animate:true, duration:0.9 });
 };
-
 // ===== Search =====
 const input = document.getElementById("searchInput");
 const suggestBox = document.getElementById("suggestBox");
@@ -3030,6 +3091,15 @@ function showSearchPins(list) {
     clearSearchPins(); // Ensure old pins are gone
 
     list.forEach((item, index) => {
+        // 1. Create the Modern Pin Icon
+        const icon = L.divIcon({
+            className: "custom-div-icon", 
+            html: `<div class="modern-pin"><span>${index + 1}</span></div>`,
+            iconSize: [40, 40],
+            iconAnchor: [20, 40], 
+            popupAnchor: [0, -35]
+        });
+
         const pin = L.marker([item.lat, item.lon], { icon }).addTo(map);
 
         // 2. Create Popup Content as a DOM element
@@ -3136,6 +3206,7 @@ function selectResult(i) {
     map.flyTo(latlng, 16, { animate: true, duration: 1 });
 
 }
+
 
 const micBtn = document.getElementById('micBtn');
 micBtn.onclick = async () => {

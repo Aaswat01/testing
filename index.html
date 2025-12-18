@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>7</title>
+<title>8</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -2161,7 +2161,7 @@ function createGMArrow(latlng, bearing, typeClass) {
     arrowEl.className = "gm-road-arrow";
     arrowEl.innerHTML = `<div class="gm-arrow-icon ${typeClass}"></div>`;
 
-    const marker = L.marker(latlng, {
+    return L.marker(latlng, {
         interactive: false,
         icon: L.divIcon({
             className: "",
@@ -2170,14 +2170,6 @@ function createGMArrow(latlng, bearing, typeClass) {
             iconAnchor: [12, 12]
         })
     });
-
-    // store original road bearing
-    marker._gmBaseBearing = bearing;
-    marker._gmArrowEl = arrowEl;
-    // initial rotation (before any map rotation)
-    arrowEl.style.transform = `rotate(${bearing}deg)`;
-
-    return marker;
 }
 
 // ===== Route creation =====

@@ -1,10 +1,9 @@
 <!DOCTYPE html>
-<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>11</title>
+<title>12</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -542,30 +541,6 @@ align-items:center;color:#fff;font-size:0.9rem;}
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
   transform-origin: center center;
   z-index: 500;
-  transform-origin: center center !important;
-  will-change: transform;
-  filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.4));
-  transition: transform 0.2s ease-out; /* Smooths out the arrow transition */
-}
-.gm-road-arrow-container {
-    border: none !important;
-    background: none !important;
-    pointer-events: none;
-}
-/* 🔒 LOCK ARROWS TO ROAD — IGNORE MAP ROTATION COMPLETELY */
-.gm-road-arrow {
-    transform-origin: center center !important;
-    will-change: transform;
-}
-
-/* Force arrows to stay visually fixed when map rotates */
-.leaflet-rotate-pane .gm-road-arrow {
-    transform: inherit !important;
-}
-
-/* Prevent leaflet-rotate from touching arrow containers */
-.gm-road-arrow-container {
-    transform: none !important;
 }
 
 .gm-arrow-icon {
@@ -829,7 +804,6 @@ let compassMode = 0;
 // GLOBAL API LOAD CONTROLLER
 // Prevent too many API calls
 // ==========================
-let suppressOffRouteCheckUntil = 0;
 let activeRequests = 0;
 const MAX_REQUESTS = 6;     // safe limit
 const REQUEST_DELAY = 120;  // ms delay between API queues
@@ -1275,7 +1249,6 @@ if (navigator.geolocation){
 const compassBtn = document.getElementById("compass-btn");
 
 compassBtn.onclick = () => {
-  suppressOffRouteCheckUntil = Date.now() + 2000;
     compassMode = (compassMode + 1) % 2;
 
     if (compassMode === 0) {
@@ -1541,10 +1514,6 @@ function smartStepAdvancement(latlng) {
     }   
     // Update current step
     currentStepIndex = newStepIndex;
-    // ✅ FORCE ROUTE TO FACE UP AFTER STEP CHANGE
-    if (autoRotation) {
-        requestAnimationFrame(() => rotateTowardRoute());
-    }
     announcedSteps.clear(); // Reset announcements 
     // 3. 🔥 NEW: Force Map to Rotate Upwards for the New Step
     if (autoRotation) {
@@ -1749,46 +1718,7 @@ function triggerReroute(currentLL, route) {
 
     safeReroute(route, currentLL, destLL); 
 }
-function addGoogleStyleRoadArrows(coords, group) {
-    if (!coords || coords.length < 2) return;
-    
-    // We clear existing arrows before adding new ones
-    group.clearLayers();
 
-    // Distance between arrows (approx every 15-20 points to avoid clutter)
-    const step = 15; 
-    
-    for (let i = 0; i < coords.length - 1; i += step) {
-        const p1 = coords[i];
-        const p2 = coords[i + 1];
-        
-        // Calculate the bearing of the road segment
-        const bearing = L.GeometryUtil.bearing(p1, p2);
-        
-        // Use a DivIcon with a specific class 'ignore-map-rotation'
-        const arrowIcon = L.divIcon({
-            className: 'gm-road-arrow-container',
-            html: `
-                <div class="gm-road-arrow" style="transform: rotate(${bearing}deg);">
-                    <svg viewBox="0 0 24 24" width="24" height="24">
-                        <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z" fill="white" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>
-                    </svg>
-                </div>
-            `,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
-        });
-
-        const marker = L.marker(p1, { 
-            icon: arrowIcon,
-            interactive: false,
-            // This is the key for the leaflet-rotate plugin:
-            rotationAngle: bearing 
-        });
-        
-        group.addLayer(marker);
-    }
-}
 // ===== Main AI loop =====
 async function adaptiveAIDashboard(latlng, heading) {
   const currentSpeed = calculateGPSSpeed(latlng);
@@ -1825,7 +1755,7 @@ async function adaptiveAIDashboard(latlng, heading) {
 
         // Reroute Condition
         // Reroute Condition
-        if (offDist > 75 && isMoving && !route._isRerouting && Date.now() > suppressOffRouteCheckUntil) {
+        if (offDist > 75 && isMoving && !route._isRerouting) {
             const now = Date.now();
             
             // ✅ Prevent spam rerouting
@@ -2047,8 +1977,6 @@ async function safeReroute(route, currentLL) {
                 lat: c.lat,
                 lng: c.lng
             }));
-            // 🧭 rebuild Google-style road arrows after reroute
-            route.roadArrows = addGoogleStyleRoadArrows(coords, newGroup);
 
             // elevation
             const elevs = new Array(coords.length).fill(0);
@@ -2115,97 +2043,59 @@ async function safeReroute(route, currentLL) {
 function triggerReroute(currentLL, route) {
     safeReroute(route, currentLL);
 }
+
 // ===============================
-// GOOGLE MAPS STYLE ARROW ENGINE (SMART TURNS)
+// SIMPLE ROAD ARROWS (NO ROTATION BUG)
 // ===============================
 
-// 1. Calculate bearing between two points
-function roadBearing(lat1, lng1, lat2, lng2) {
-    const y = Math.sin(lng2 - lng1) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) -
-              Math.sin(lat1) * Math.cos(lat2) * Math.cos(lng2 - lng1);
-    const brng = Math.atan2(y, x);
-    return (brng * 180 / Math.PI + 360) % 360; 
+// bearing from geometry
+function roadBearingSimple(p1, p2) {
+    return Math.atan2(
+        p2.lng - p1.lng,
+        p2.lat - p1.lat
+    ) * 180 / Math.PI;
 }
 
-// 2. Normalize angle difference to -180 to +180
-function normalizeAngle(angle) {
-    while (angle <= -180) angle += 360;
-    while (angle > 180) angle -= 360;
-    return angle;
-}
-
-// 3. Main Arrow Engine
-function addGoogleStyleRoadArrows(coords, group) {
-    const arrows = [];
-    const ARROW_SPACING = 60; // Slightly closer for better turn visibility
-    let distAccumulator = ARROW_SPACING; 
-
-    // Helper to get radian coords
-    const toRad = (d) => d * Math.PI / 180;
-
-    for (let i = 0; i < coords.length - 1; i++) {
-        const p1 = L.latLng(coords[i]);
-        const p2 = L.latLng(coords[i+1]);
-        
-        const segmentDist = p1.distanceTo(p2);
-        distAccumulator += segmentDist;
-
-        if (distAccumulator >= ARROW_SPACING) {
-            
-            // A. Base Bearing (Current Segment)
-            const lat1 = toRad(p1.lat), lng1 = toRad(p1.lng);
-            const lat2 = toRad(p2.lat), lng2 = toRad(p2.lng);
-            const baseBearing = roadBearing(lat1, lng1, lat2, lng2);
-
-            // B. Look Ahead for Turns (Next Segment)
-            let turnAngle = 0;
-            if (i < coords.length - 2) {
-                const p3 = L.latLng(coords[i+2]);
-                const lat3 = toRad(p3.lat), lng3 = toRad(p3.lng);
-                const nextBearing = roadBearing(lat2, lng2, lat3, lng3);
-                turnAngle = normalizeAngle(nextBearing - baseBearing);
-            }
-
-            // C. Determine Icon based on Turn Angle  
-            const arrowClass = getArrowClassByAngle(turnAngle);
-
-            // D. Create Marker
-            const arrow = createGMArrow(p1, baseBearing, arrowClass).addTo(group);
-            
-            arrows.push({
-                marker: arrow,
-                baseBearing: baseBearing
-            });
-
-            distAccumulator = 0; 
-        }
-    }
-    return arrows;
-}
-
-// 4. Smart Icon Selector
-function getArrowClassByAngle(angle) {
-    // Thresholds for turn types
-    return "gm-arrow-straight";                   // Straight
-}
-
-// 5. Create Marker
-function createGMArrow(latlng, bearing, typeClass) {
-    return L.marker(latlng, {
+// create arrow marker (ROTATED ONCE ONLY)
+function createFixedArrow(latlng, bearing) {
+    const marker = L.marker(latlng, {
         interactive: false,
         icon: L.divIcon({
-            className: "", 
-            html: `
-              <div class="gm-road-arrow" style="transform: rotate(${bearing}deg);">
-                <div class="gm-arrow-icon ${typeClass}"></div>
-              </div>
-            `,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
+            className: "",
+            html: `<div style="
+                width:18px;
+                height:18px;
+                font-size:18px;
+                color:#000;
+                transform: rotate(${bearing}deg);
+                transform-origin:center;
+                pointer-events:none;
+            ">➤</div>`,
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
         })
     });
+    return marker;
 }
+
+// add arrows strictly along the polyline
+function addFixedRoadArrows(coords, group) {
+    const SPACING = 60; // meters
+    let lastPlaced = null;
+
+    for (let i = 1; i < coords.length; i++) {
+        const p0 = L.latLng(coords[i - 1]);
+        const p1 = L.latLng(coords[i]);
+
+        if (lastPlaced && p1.distanceTo(lastPlaced) < SPACING) continue;
+
+        const bearing = roadBearingSimple(p0, p1);
+        createFixedArrow(p1, bearing).addTo(group);
+
+        lastPlaced = p1;
+    }
+}
+
 
 // ===== Route creation =====
 async function createRoute(start, end, color, marker = null, index = null) {
@@ -2281,16 +2171,10 @@ rc.on("routesfound", async e => {
     // Reset step system SAFELY
     currentStepIndex = 0;
     announcedSteps.clear();
-    // ✅ Ensure rerouted path faces up
-    if (autoRotation) {
-        setTimeout(() => rotateTowardRoute(), 400);
-    }
 
     // Prepare coordinate list
     const coords = r.coordinates.map(c => ({ lat: c.lat, lng: c.lng }));
-    // 🧭 ADD GOOGLE MAPS STYLE ROAD ARROWS (NO STEP DEPENDENCY)
-    const roadArrows = addGoogleStyleRoadArrows(coords, group);
-
+    addFixedRoadArrows(coords, group);
     // Fetch elevations safely
     const elevs = new Array(coords.length).fill(0);
 
@@ -2499,15 +2383,12 @@ document.getElementById("map-toggle").addEventListener("click", () => {
 });
 
 document.getElementById("locate-btn").onclick = () => {
-    suppressOffRouteCheckUntil = Date.now() + 2000; // 🛑 block reroute for 2s
     follow = true;
     autoCenter = true;
-    userHasTouchedMap = false;
-    if (userMarker) {
-        map.panTo(userMarker.getLatLng(), { animate:true });
-    }
+    userHasTouchedMap = false; 
+    // NOTE: Do NOT enable autoRotation here.
+    map.flyTo(userMarker.getLatLng(), 19, { animate:true, duration:0.9 });
 };
-
 // ===== Search =====
 const input = document.getElementById("searchInput");
 const suggestBox = document.getElementById("suggestBox");
@@ -3239,6 +3120,7 @@ function selectResult(i) {
     map.flyTo(latlng, 16, { animate: true, duration: 1 });
 
 }
+
 
 const micBtn = document.getElementById('micBtn');
 micBtn.onclick = async () => {

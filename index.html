@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>5</title>
+<title>6</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -540,7 +540,7 @@ align-items:center;color:#fff;font-size:0.9rem;}
   justify-content: center;
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
   transform-origin: center center;
-  transform: none !important;   /* 🔒 LOCK */
+  z-index: 500;
 }
 
 .gm-arrow-icon {
@@ -712,6 +712,7 @@ align-items:center;color:#fff;font-size:0.9rem;}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js"></script>
 <script src="leaflet-rotate-src.js"></script>
 <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+<script src="https://unpkg.com/leaflet-polylinedecorator@1.7.0/dist/leaflet.polylineDecorator.min.js"></script>
 <script>
 
 // ==============================
@@ -727,6 +728,29 @@ const map = L.map('map', {
     rotateControl: true,
     inertia: true
 });
+function addArrowLine(polyline, group) {
+    const decorator = L.polylineDecorator(polyline, {
+        patterns: [
+            {
+                offset: 20,
+                repeat: 80,
+                symbol: L.Symbol.arrowHead({
+                    pixelSize: 10,
+                    polygon: false,
+                    pathOptions: {
+                        stroke: true,
+                        color: "#ffffff",
+                        weight: 2,
+                        opacity: 0.9
+                    }
+                })
+            }
+        ]
+    });
+
+    decorator.addTo(group);
+    return decorator;
+}
 
 let autoCenter = true;
 const nightMap = L.tileLayer(
@@ -1608,6 +1632,10 @@ function maybeRepeatCurrentStep() {
     const reminder = `Reminder: ${step.text}. Proceed for ${distText}.`;
     speak(reminder, "step", { interrupt: false });
   }
+  if (route.arrowDecorator) {
+    try { map.removeLayer(route.arrowDecorator); } catch {}
+    route.arrowDecorator = null;
+  }
 }
 
 // 🔄 AUTO-REPEAT EVERY 10 SECONDS WHEN TAB IS ACTIVE
@@ -1718,43 +1746,6 @@ function triggerReroute(currentLL, route) {
 
     safeReroute(route, currentLL, destLL); 
 }
-function addGoogleStyleRoadArrows(coords, group) {
-    const arrows = [];
-
-    const SPACING = 30;        // meters between arrows
-    const ANGLE_TRIGGER = 5;   // detect slight curves
-
-    let lastPlaced = null;
-    let lastBearing = null;
-
-    for (let i = 1; i < coords.length - 1; i++) {
-        const p0 = L.latLng(coords[i - 1]);
-        const p1 = L.latLng(coords[i]);
-        const p2 = L.latLng(coords[i + 1]);
-
-        if (lastPlaced && p1.distanceTo(lastPlaced) < SPACING) continue;
-
-        const b1 = roadBearing(p0, p1);
-        const b2 = roadBearing(p1, p2);
-        const delta = normalizeAngle(b2 - b1);
-
-        if (lastBearing !== null && Math.abs(delta) < ANGLE_TRIGGER) continue;
-
-        const symbol = gmArrowByDelta(delta);
-        const arrow = createGMArrow(p1, symbol).addTo(group);
-
-        arrows.push({
-            marker: arrow,
-            baseBearing: b2
-        });
-
-        lastPlaced = p1;
-        lastBearing = b2;
-    }
-
-    return arrows;
-}
-
 // ===== Main AI loop =====
 async function adaptiveAIDashboard(latlng, heading) {
   const currentSpeed = calculateGPSSpeed(latlng);
@@ -2013,9 +2004,6 @@ async function safeReroute(route, currentLL) {
                 lat: c.lat,
                 lng: c.lng
             }));
-            // 🧭 rebuild Google-style road arrows after reroute
-            route.roadArrows = addGoogleStyleRoadArrows(coords, newGroup);
-
             // elevation
             const elevs = new Array(coords.length).fill(0);
 
@@ -2057,6 +2045,10 @@ async function safeReroute(route, currentLL) {
                     translated: false
                 });
             });
+            if (route.arrowDecorator) {
+                try { map.removeLayer(route.arrowDecorator); } catch {}
+                route.arrowDecorator = null;
+            }
 
             // 7️⃣ Reset state only for this route
             activeRouteIndex = routeIndex;
@@ -2080,105 +2072,6 @@ async function safeReroute(route, currentLL) {
 // ======================================================
 function triggerReroute(currentLL, route) {
     safeReroute(route, currentLL);
-}
-// ===============================
-// GOOGLE MAPS STYLE ARROW ENGINE (SMART TURNS)
-// ===============================
-
-// 1. Calculate bearing between two points
-function roadBearing(lat1, lng1, lat2, lng2) {
-    const y = Math.sin(lng2 - lng1) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) -
-              Math.sin(lat1) * Math.cos(lat2) * Math.cos(lng2 - lng1);
-    const brng = Math.atan2(y, x);
-    return (brng * 180 / Math.PI + 360) % 360; 
-}
-
-// 2. Normalize angle difference to -180 to +180
-function normalizeAngle(angle) {
-    while (angle <= -180) angle += 360;
-    while (angle > 180) angle -= 360;
-    return angle;
-}
-
-// 3. Main Arrow Engine
-function addGoogleStyleRoadArrows(coords, group) {
-    const arrows = [];
-    const ARROW_SPACING = 60; // Slightly closer for better turn visibility
-    let distAccumulator = ARROW_SPACING; 
-
-    // Helper to get radian coords
-    const toRad = (d) => d * Math.PI / 180;
-
-    for (let i = 0; i < coords.length - 1; i++) {
-        const p1 = L.latLng(coords[i]);
-        const p2 = L.latLng(coords[i+1]);
-        
-        const segmentDist = p1.distanceTo(p2);
-        distAccumulator += segmentDist;
-
-        if (distAccumulator >= ARROW_SPACING) {
-            
-            // A. Base Bearing (Current Segment)
-            const lat1 = toRad(p1.lat), lng1 = toRad(p1.lng);
-            const lat2 = toRad(p2.lat), lng2 = toRad(p2.lng);
-            const baseBearing = roadBearing(lat1, lng1, lat2, lng2);
-
-            // B. Look Ahead for Turns (Next Segment)
-            let turnAngle = 0;
-            if (i < coords.length - 2) {
-                const p3 = L.latLng(coords[i+2]);
-                const lat3 = toRad(p3.lat), lng3 = toRad(p3.lng);
-                const nextBearing = roadBearing(lat2, lng2, lat3, lng3);
-                turnAngle = normalizeAngle(nextBearing - baseBearing);
-            }
-
-            // C. Determine Icon based on Turn Angle  
-            const arrowClass = getArrowClassByAngle(turnAngle);
-
-            // D. Create Marker
-            const arrow = createGMArrow(p1, baseBearing, arrowClass).addTo(group);
-            
-            arrows.push({
-                marker: arrow,
-                baseBearing: baseBearing
-            });
-
-            distAccumulator = 0; 
-        }
-    }
-    return arrows;
-}
-
-// 4. Smart Icon Selector
-function getArrowClassByAngle(angle) {
-    // Thresholds for turn types
-    return "gm-arrow-straight";                   // Straight
-}
-
-// 5. Create Marker
-function createGMArrow(latlng, bearing, typeClass) {
-    const arrowEl = document.createElement("div");
-    arrowEl.className = "gm-road-arrow";
-    arrowEl.innerHTML = `<div class="gm-arrow-icon ${typeClass}"></div>`;
-
-    const marker = L.marker(latlng, {
-        interactive: false,
-        icon: L.divIcon({
-            className: "",
-            html: arrowEl,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
-        })
-    });
-
-    // store original road bearing
-    marker._gmBaseBearing = bearing;
-    marker._gmArrowEl = arrowEl;
-    // initial rotation (before any map rotation)
-    arrowEl.style.transform = `rotate(${bearing}deg)`;
-    arrowEl.style.willChange = "transform";
-    return marker;
 }
 
 // ===== Route creation =====
@@ -2258,9 +2151,6 @@ rc.on("routesfound", async e => {
 
     // Prepare coordinate list
     const coords = r.coordinates.map(c => ({ lat: c.lat, lng: c.lng }));
-    // 🧭 ADD GOOGLE MAPS STYLE ROAD ARROWS (NO STEP DEPENDENCY)
-    const roadArrows = addGoogleStyleRoadArrows(coords, group);
-
     // Fetch elevations safely
     const elevs = new Array(coords.length).fill(0);
 
@@ -2292,7 +2182,8 @@ rc.on("routesfound", async e => {
         weight: 5,
         opacity: 0.8
       }).addTo(group);
-
+      
+      route.arrowDecorator = addArrowLine(routeLine, group);
       // 3. Create the HTML Box
       const item = document.createElement("div");
       item.className = "route-step";
@@ -2425,7 +2316,6 @@ map.on("click", async e => {
     preview.start = startPoint;
 
 });
-
 function rebuildRoutes() {
   const driver = userMarker ? userMarker.getLatLng() : map.getCenter();
   const validWaypoints = [driver]; const validMarkers = [];

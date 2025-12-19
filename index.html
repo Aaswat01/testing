@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>2-arrow new</title>
+<title>3-arrow</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -539,8 +539,6 @@ align-items:center;color:#fff;font-size:0.9rem;}
   align-items: center;
   justify-content: center;
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-  transform-origin: center center;
-  z-index: 500;
 }
 
 .gm-arrow-icon {
@@ -551,12 +549,9 @@ align-items:center;color:#fff;font-size:0.9rem;}
   background-size: contain;
 }
 
-/* --- SMART ARROW TYPES (SVGs) --- */
-/* Straight */
 .gm-arrow-straight {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000000'%3E%3Cpath d='M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,...");
 }
-
 
 </style>
 </head>
@@ -1710,44 +1705,42 @@ function triggerReroute(currentLL, route) {
 
     safeReroute(route, currentLL, destLL); 
 }
-// ===============================
-// GOOGLE MAPS STYLE POLYLINE ARROWS (NO ICONS)
-// ===============================
-function addPolylineArrows(coords, group) {
-    const arrowSpacing = 80; // meters
-    let lastPoint = null;
+function addGoogleStyleRoadArrows(coords, group) {
+    const arrows = [];
 
-    for (let i = 1; i < coords.length; i++) {
-        const p1 = L.latLng(coords[i - 1]);
-        const p2 = L.latLng(coords[i]);
+    const SPACING = 30;        // meters between arrows
+    const ANGLE_TRIGGER = 5;   // detect slight curves
 
-        if (lastPoint && p2.distanceTo(lastPoint) < arrowSpacing) continue;
+    let lastPlaced = null;
+    let lastBearing = null;
 
-        // small arrow head using polyline
-        const arrow = L.polylineDecorator(
-            L.polyline([p1, p2]),
-            {
-                patterns: [{
-                    offset: '100%',
-                    repeat: 0,
-                    symbol: L.Symbol.arrowHead({
-                        pixelSize: 10,
-                        polygon: false,
-                        pathOptions: {
-                            stroke: true,
-                            weight: 2,
-                            color: '#ffffff'
-                        }
-                    })
-                }]
-            }
-        );
+    for (let i = 1; i < coords.length - 1; i++) {
+        const p0 = L.latLng(coords[i - 1]);
+        const p1 = L.latLng(coords[i]);
+        const p2 = L.latLng(coords[i + 1]);
 
-        arrow.addTo(group);
-        lastPoint = p2;
+        if (lastPlaced && p1.distanceTo(lastPlaced) < SPACING) continue;
+
+        const b1 = roadBearing(p0, p1);
+        const b2 = roadBearing(p1, p2);
+        const delta = normalizeAngle(b2 - b1);
+
+        if (lastBearing !== null && Math.abs(delta) < ANGLE_TRIGGER) continue;
+
+        const symbol = gmArrowByDelta(delta);
+        const arrow = createGMArrow(p1, symbol).addTo(group);
+
+        arrows.push({
+            marker: arrow,
+            baseBearing: b2
+        });
+
+        lastPlaced = p1;
+        lastBearing = b2;
     }
-}
 
+    return arrows;
+}
 
 // ===== Main AI loop =====
 async function adaptiveAIDashboard(latlng, heading) {
@@ -2008,7 +2001,7 @@ async function safeReroute(route, currentLL) {
                 lng: c.lng
             }));
             // 🧭 rebuild Google-style road arrows after reroute
-            route.roadArrows = addGoogleStyleRoadArrows(coords, newGroup);
+            addFixedRoadArrows(coords, group);
 
             // elevation
             const elevs = new Array(coords.length).fill(0);
@@ -2074,6 +2067,53 @@ async function safeReroute(route, currentLL) {
 // ======================================================
 function triggerReroute(currentLL, route) {
     safeReroute(route, currentLL);
+}
+// ===============================
+// FIXED ROAD ARROWS (NO ROTATION)
+// ===============================
+
+// Simple bearing between two points
+function fixedRoadBearing(p1, p2) {
+    return Math.atan2(
+        p2.lng - p1.lng,
+        p2.lat - p1.lat
+    ) * 180 / Math.PI;
+}
+
+// Create arrow marker (ROTATED ONCE ONLY)
+function createFixedArrow(latlng, bearing) {
+    return L.marker(latlng, {
+        interactive: false,
+        icon: L.divIcon({
+            className: "",
+            html: `
+              <div class="gm-road-arrow"
+                   style="transform: rotate(${bearing}deg);">
+                <div class="gm-arrow-icon gm-arrow-straight"></div>
+              </div>
+            `,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        })
+    });
+}
+
+// Add arrows strictly along the route geometry
+function addFixedRoadArrows(coords, group) {
+    const SPACING = 50; // meters between arrows
+    let lastPlaced = null;
+
+    for (let i = 1; i < coords.length; i++) {
+        const p0 = L.latLng(coords[i - 1]);
+        const p1 = L.latLng(coords[i]);
+
+        if (lastPlaced && p1.distanceTo(lastPlaced) < SPACING) continue;
+
+        const bearing = fixedRoadBearing(p0, p1);
+        createFixedArrow(p1, bearing).addTo(group);
+
+        lastPlaced = p1;
+    }
 }
 
 // ===== Route creation =====
@@ -2153,7 +2193,6 @@ rc.on("routesfound", async e => {
 
     // Prepare coordinate list
     const coords = r.coordinates.map(c => ({ lat: c.lat, lng: c.lng }));
-    addPolylineArrows(coords, group);
     // 🧭 ADD GOOGLE MAPS STYLE ROAD ARROWS (NO STEP DEPENDENCY)
     const roadArrows = addGoogleStyleRoadArrows(coords, group);
 
@@ -2320,18 +2359,6 @@ map.on("click", async e => {
 
     preview.start = startPoint;
 
-});
-map.on("rotate", () => {
-    const mapBearing = map.getBearing() || 0;
-
-    STATIC_GM_ARROWS.forEach(marker => {
-        if (!marker._gmArrowEl) return;
-
-        // cancel map rotation
-        const fixedRotation = marker._gmBaseBearing - mapBearing;
-        marker._gmArrowEl.style.transform =
-            `rotate(${fixedRotation}deg)`;
-    });
 });
 
 function rebuildRoutes() {
@@ -3129,6 +3156,5 @@ micBtn.onclick = async () => {
   } catch { alert('Please allow microphone permission to use voice search.'); }
 };
 </script>
-<script src="https://unpkg.com/leaflet-polylinedecorator@1.7.0/dist/leaflet.polylineDecorator.min.js"></script>
 </body>
 </html>

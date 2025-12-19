@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>6-arrow</title>
+<title>7-arrow</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -531,16 +531,11 @@ align-items:center;color:#fff;font-size:0.9rem;}
 }
 /* === GOOGLE MAPS STYLE SMART ARROWS === */
 .gm-road-arrow {
-  width: 24px;
-  height: 24px;
-  background: #ffffff;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  font-size: 18px;
+  color: #000;
+  font-weight: bold;
   transform-origin: center center;
-  z-index: 500;
+  pointer-events: none;
 }
 
 .gm-arrow-icon {
@@ -1711,41 +1706,23 @@ function triggerReroute(currentLL, route) {
     safeReroute(route, currentLL, destLL); 
 }
 function addGoogleStyleRoadArrows(coords, group) {
-    const arrows = [];
-
-    const SPACING = 30;        // meters between arrows
-    const ANGLE_TRIGGER = 5;   // detect slight curves
-
+    const SPACING = 60; // meters
     let lastPlaced = null;
-    let lastBearing = null;
 
-    for (let i = 1; i < coords.length - 1; i++) {
+    for (let i = 1; i < coords.length; i++) {
         const p0 = L.latLng(coords[i - 1]);
         const p1 = L.latLng(coords[i]);
-        const p2 = L.latLng(coords[i + 1]);
 
         if (lastPlaced && p1.distanceTo(lastPlaced) < SPACING) continue;
 
-        const b1 = roadBearing(p0, p1);
-        const b2 = roadBearing(p1, p2);
-        const delta = normalizeAngle(b2 - b1);
+        const bearing =
+            Math.atan2(p1.lng - p0.lng, p1.lat - p0.lat) * 180 / Math.PI;
 
-        if (lastBearing !== null && Math.abs(delta) < ANGLE_TRIGGER) continue;
-
-        const symbol = gmArrowByDelta(delta);
-        const arrow = createGMArrow(p1, symbol).addTo(group);
-
-        arrows.push({
-            marker: arrow,
-            baseBearing: b2
-        });
-
+        createGMArrow(p1, bearing).addTo(group);
         lastPlaced = p1;
-        lastBearing = b2;
     }
-
-    return arrows;
 }
+
 
 // ===== Main AI loop =====
 async function adaptiveAIDashboard(latlng, heading) {
@@ -2147,36 +2124,27 @@ function getArrowClassByAngle(angle) {
     // Thresholds for turn types
     return "gm-arrow-straight";                   // Straight
 }
+
 // 5. Create Marker
-function createGMArrow(latlng, bearing, typeClass) {
+function createGMArrow(latlng, bearing) {
     const arrowEl = document.createElement("div");
     arrowEl.className = "gm-road-arrow";
-    arrowEl.innerHTML = `<div class="gm-arrow-icon ${typeClass}"></div>`;
+    arrowEl.textContent = "➤";
 
-    // 🔴 REMOVE or COMMENT OUT this line:
-    // arrowEl.style.transform = `rotate(${bearing}deg)`; 
-    // We do NOT want to rotate the HTML manually anymore.
+    // 🔒 rotate ONCE based on road direction
+    arrowEl.style.transform = `rotate(${bearing}deg)`;
 
-    // 🟢 UPDATE the marker creation:
-    const marker = L.marker(latlng, {
+    return L.marker(latlng, {
         interactive: false,
-        
-        // This tells the leaflet-rotate plugin to lock this marker 
-        // to a specific compass bearing, automatically adjusting 
-        // when you rotate the map.
-        rotationAngle: bearing,  
-        rotationOrigin: 'center center', 
-
         icon: L.divIcon({
             className: "",
             html: arrowEl,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
         })
     });
-
-    return marker;
 }
+
 
 // ===== Route creation =====
 async function createRoute(start, end, color, marker = null, index = null) {

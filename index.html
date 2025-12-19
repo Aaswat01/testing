@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>3-arrow</title>
+<title>4-arrow</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -539,6 +539,8 @@ align-items:center;color:#fff;font-size:0.9rem;}
   align-items: center;
   justify-content: center;
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  transform-origin: center center;
+  z-index: 500;
 }
 
 .gm-arrow-icon {
@@ -549,9 +551,12 @@ align-items:center;color:#fff;font-size:0.9rem;}
   background-size: contain;
 }
 
+/* --- SMART ARROW TYPES (SVGs) --- */
+/* Straight */
 .gm-arrow-straight {
-  background-image: url("data:image/svg+xml,...");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000000'%3E%3Cpath d='M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z'/%3E%3C/svg%3E");
 }
+
 
 </style>
 </head>
@@ -2001,7 +2006,7 @@ async function safeReroute(route, currentLL) {
                 lng: c.lng
             }));
             // 🧭 rebuild Google-style road arrows after reroute
-            addFixedRoadArrows(coords, group);
+            route.roadArrows = addGoogleStyleRoadArrows(coords, newGroup);
 
             // elevation
             const elevs = new Array(coords.length).fill(0);
@@ -2069,51 +2074,100 @@ function triggerReroute(currentLL, route) {
     safeReroute(route, currentLL);
 }
 // ===============================
-// FIXED ROAD ARROWS (NO ROTATION)
+// GOOGLE MAPS STYLE ARROW ENGINE (SMART TURNS)
 // ===============================
 
-// Simple bearing between two points
-function fixedRoadBearing(p1, p2) {
-    return Math.atan2(
-        p2.lng - p1.lng,
-        p2.lat - p1.lat
-    ) * 180 / Math.PI;
+// 1. Calculate bearing between two points
+function roadBearing(lat1, lng1, lat2, lng2) {
+    const y = Math.sin(lng2 - lng1) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) -
+              Math.sin(lat1) * Math.cos(lat2) * Math.cos(lng2 - lng1);
+    const brng = Math.atan2(y, x);
+    return (brng * 180 / Math.PI + 360) % 360; 
 }
 
-// Create arrow marker (ROTATED ONCE ONLY)
-function createFixedArrow(latlng, bearing) {
-    return L.marker(latlng, {
+// 2. Normalize angle difference to -180 to +180
+function normalizeAngle(angle) {
+    while (angle <= -180) angle += 360;
+    while (angle > 180) angle -= 360;
+    return angle;
+}
+
+// 3. Main Arrow Engine
+function addGoogleStyleRoadArrows(coords, group) {
+    const arrows = [];
+    const ARROW_SPACING = 60; // Slightly closer for better turn visibility
+    let distAccumulator = ARROW_SPACING; 
+
+    // Helper to get radian coords
+    const toRad = (d) => d * Math.PI / 180;
+
+    for (let i = 0; i < coords.length - 1; i++) {
+        const p1 = L.latLng(coords[i]);
+        const p2 = L.latLng(coords[i+1]);
+        
+        const segmentDist = p1.distanceTo(p2);
+        distAccumulator += segmentDist;
+
+        if (distAccumulator >= ARROW_SPACING) {
+            
+            // A. Base Bearing (Current Segment)
+            const lat1 = toRad(p1.lat), lng1 = toRad(p1.lng);
+            const lat2 = toRad(p2.lat), lng2 = toRad(p2.lng);
+            const baseBearing = roadBearing(lat1, lng1, lat2, lng2);
+
+            // B. Look Ahead for Turns (Next Segment)
+            let turnAngle = 0;
+            if (i < coords.length - 2) {
+                const p3 = L.latLng(coords[i+2]);
+                const lat3 = toRad(p3.lat), lng3 = toRad(p3.lng);
+                const nextBearing = roadBearing(lat2, lng2, lat3, lng3);
+                turnAngle = normalizeAngle(nextBearing - baseBearing);
+            }
+
+            // C. Determine Icon based on Turn Angle  
+            const arrowClass = getArrowClassByAngle(turnAngle);
+
+            // D. Create Marker
+            const arrow = createGMArrow(p1, baseBearing, arrowClass).addTo(group);
+            
+            arrows.push({
+                marker: arrow,
+                baseBearing: baseBearing
+            });
+
+            distAccumulator = 0; 
+        }
+    }
+    return arrows;
+}
+
+// 4. Smart Icon Selector
+function getArrowClassByAngle(angle) {
+    // Thresholds for turn types
+    return "gm-arrow-straight";                   // Straight
+}
+// 5. Create Marker
+function createGMArrow(latlng, bearing, typeClass) {
+    const arrowEl = document.createElement("div");
+    arrowEl.className = "gm-road-arrow";
+    arrowEl.innerHTML = `<div class="gm-arrow-icon ${typeClass}"></div>`;
+
+    // 🔒 Rotate ONCE based on road direction
+    arrowEl.style.transform = `rotate(${bearing}deg)`;
+    arrowEl.style.transformOrigin = "center";
+
+    const marker = L.marker(latlng, {
         interactive: false,
         icon: L.divIcon({
             className: "",
-            html: `
-              <div class="gm-road-arrow"
-                   style="transform: rotate(${bearing}deg);">
-                <div class="gm-arrow-icon gm-arrow-straight"></div>
-              </div>
-            `,
+            html: arrowEl,
             iconSize: [24, 24],
             iconAnchor: [12, 12]
         })
     });
-}
 
-// Add arrows strictly along the route geometry
-function addFixedRoadArrows(coords, group) {
-    const SPACING = 50; // meters between arrows
-    let lastPlaced = null;
-
-    for (let i = 1; i < coords.length; i++) {
-        const p0 = L.latLng(coords[i - 1]);
-        const p1 = L.latLng(coords[i]);
-
-        if (lastPlaced && p1.distanceTo(lastPlaced) < SPACING) continue;
-
-        const bearing = fixedRoadBearing(p0, p1);
-        createFixedArrow(p1, bearing).addTo(group);
-
-        lastPlaced = p1;
-    }
+    return marker;
 }
 
 // ===== Route creation =====

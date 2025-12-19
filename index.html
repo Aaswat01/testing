@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>5-arrow</title>
+<title>6-arrow</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -2153,11 +2153,20 @@ function createGMArrow(latlng, bearing, typeClass) {
     arrowEl.className = "gm-road-arrow";
     arrowEl.innerHTML = `<div class="gm-arrow-icon ${typeClass}"></div>`;
 
-    // ❌ DO NOT rotate here (this caused the flip)
-    arrowEl.style.transformOrigin = "center";
+    // 🔴 REMOVE or COMMENT OUT this line:
+    // arrowEl.style.transform = `rotate(${bearing}deg)`; 
+    // We do NOT want to rotate the HTML manually anymore.
 
+    // 🟢 UPDATE the marker creation:
     const marker = L.marker(latlng, {
         interactive: false,
+        
+        // This tells the leaflet-rotate plugin to lock this marker 
+        // to a specific compass bearing, automatically adjusting 
+        // when you rotate the map.
+        rotationAngle: bearing,  
+        rotationOrigin: 'center center', 
+
         icon: L.divIcon({
             className: "",
             html: arrowEl,
@@ -2165,10 +2174,6 @@ function createGMArrow(latlng, bearing, typeClass) {
             iconAnchor: [12, 12]
         })
     });
-
-    // ✅ store road bearing ONCE (map-space)
-    marker._roadBearing = bearing;
-    marker._arrowEl = arrowEl;
 
     return marker;
 }
@@ -2397,22 +2402,6 @@ rc.on("routesfound", async e => {
   });
 
 }
-map.on("rotate", () => {
-    const mapBearing = map.getBearing() || 0;
-
-    routes.forEach(route => {
-        if (!route.roadArrows) return;
-
-        route.roadArrows.forEach(obj => {
-            const marker = obj.marker || obj;
-            if (!marker || !marker._arrowEl) return;
-
-            // 🔒 Counter-rotate screen so arrow stays aligned to road
-            marker._arrowEl.style.transform =
-                `rotate(${marker._roadBearing - mapBearing}deg)`;
-        });
-    });
-});
 
 map.on("click", async e => {
 

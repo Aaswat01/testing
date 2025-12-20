@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>9</title>
+<title>10-path</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -1565,6 +1565,9 @@ function cleanupRoute(route) {
     waypointMarkers.splice(destIndex, 1);
     waypoints.splice(destIndex + 1, 1);
   }
+  if (route.mainLine) {
+      try { route.mainLine.remove(); } catch {}
+  }
   const box = document.getElementById(`route-box-${route.routeIndex}`);
   if (box) box.remove();
   routes.splice(activeRouteIndex, 1);
@@ -1970,25 +1973,18 @@ async function safeReroute(route, currentLL) {
             }
 
             const r = result[0];
-
-            // 5️⃣ Replace route.rc with new control
-            route.rc = L.Routing.control({
-                router: OSRM_ROUTER,
-                waypoints: [currentLL, destLL],
-                show: false,
-                addWaypoints: false,
-                createMarker: () => null,
-                lineOptions: {
-                    styles: [{
-                        color: route.color,
-                        weight: 5,
-                        opacity: 0.9
-                    }]
+            // ✅ DRAW MAIN ROUTE LINE MANUALLY (VISIBLE FIX)
+            const routeLine = L.polyline(
+                r.coordinates.map(c => [c.lat, c.lng]),
+                {
+                    color: route.color,
+                    weight: 5,
+                    opacity: 0.9
                 }
-            }).addTo(map);
+            ).addTo(newGroup);
 
-            document.querySelectorAll(".leaflet-routing-container")
-                .forEach(x => x.style.display = "none");
+            // store reference so cleanup works
+            route.mainLine = routeLine;
 
             // 6️⃣ Build steps again into SAME box
             const content = document.querySelector(
@@ -2241,8 +2237,7 @@ async function createRoute(start, end, color, marker = null, index = null) {
     rebuildRoutes();
     refreshAIBox();
   };
-
-rc.on("routesfound", async e => {
+  rc.on("routesfound", async e => {
 
     if (!e.routes || !e.routes[0]) return;
 

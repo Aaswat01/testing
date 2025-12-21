@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>2-pathrotation</title>
+<title>1-reroutetest</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -1080,27 +1080,28 @@ function ecoAdvisor(distAhead, slope){
 }
 // ===== Elevation Fix + Directional Arrows + Turn Signals =====
 async function getElevations(coords) {
-  try {
-    const chunkSize = 50;
-    let elevations = [];
+    try {
+        const chunkSize = 40;
+        let all = [];
 
-    for (let i = 0; i < coords.length; i += chunkSize) {
-      const batch = coords.slice(i, i + chunkSize)
-          .map(c => `${c.lat},${c.lng}`).join("|");
+        for (let i = 0; i < coords.length; i += chunkSize) {
+            const chunk = coords.slice(i, i + chunkSize);
+            const list = chunk.map(c => `${c.lat},${c.lng}`).join("|");
+            const url = `https://api.open-elevation.com/api/v1/lookup?locations=${list}`;
 
-      const url = `https://api.open-elevation.com/api/v1/lookup?locations=${batch}`;
-      const r = await fetch(url).then(x => x.json());
+            const res = await fetch(url);
+            const data = await res.json();
 
-      elevations.push(...r.results.map(v => v.elevation ?? 0));
+            all.push(...data.results.map(r => r.elevation ?? 0));
+        }
+
+        return all;
+    } catch (e) {
+        console.warn("Elevation error:", e);
+        return new Array(coords.length).fill(0);
     }
-
-    return elevations; // <-- 🔥 THIS WAS MISSING
-
-  } catch (e) {
-    console.warn("Elevation error:", e);
-    return new Array(coords.length).fill(0);
-  }
 }
+
 
 const ELEVATION_INTERVAL = 50;
 const LOOKAHEAD_DISTANCE = 200;
@@ -1959,27 +1960,7 @@ async function safeReroute(route, currentLL) {
                 console.warn("Rerouting failed", err);
                 return;
             }
-
             const r = result[0];
-
-            // 5️⃣ Replace route.rc with new control
-            route.rc = L.Routing.control({
-                router: OSRM_ROUTER,
-                waypoints: [currentLL, destLL],
-                show: false,
-                addWaypoints: false,
-                createMarker: () => null,
-                lineOptions: {
-                    styles: [{
-                        color: route.color,
-                        weight: 5,
-                        opacity: 0.9
-                    }]
-                }
-            }).addTo(map);
-
-            document.querySelectorAll(".leaflet-routing-container")
-                .forEach(x => x.style.display = "none");
 
             // 6️⃣ Build steps again into SAME box
             const content = document.querySelector(
@@ -1998,7 +1979,7 @@ async function safeReroute(route, currentLL) {
             }));
 
             // elevation
-            const elevs = new Array(coords.length).fill(0);
+            const elevs = await getElevations(coords);
 
             r.instructions.forEach((s, i) => {
                 const idxStart = s.index;
@@ -2018,6 +1999,8 @@ async function safeReroute(route, currentLL) {
                     weight: 5,
                     opacity: 0.8
                 }).addTo(newGroup);
+                const stepArrow = addPolylineArrows(stepLine, newGroup);
+                if (stepArrow) STATIC_ROUTE_DECORATORS.push(stepArrow);
 
                 const item = document.createElement("div");
                 item.className = "route-step";
@@ -2035,6 +2018,7 @@ async function safeReroute(route, currentLL) {
                     element: item,
                     distance: s.distance,
                     lineLayer: stepLine,
+                    arrowLayer: stepArrow,   // ✅ ADD
                     translated: false
                 });
             });
@@ -2157,9 +2141,7 @@ async function createRoute(start, end, color, marker = null, index = null) {
     refreshAIBox();
   };
   rc.on("routesfound", async e => {
-
     if (!e.routes || !e.routes[0]) return;
-
     const r = e.routes[0];
 
     // Reset step system SAFELY
@@ -2169,8 +2151,7 @@ async function createRoute(start, end, color, marker = null, index = null) {
     // Prepare coordinate list
     const coords = r.coordinates.map(c => ({ lat: c.lat, lng: c.lng }));
     // Fetch elevations safely
-    const elevs = new Array(coords.length).fill(0);
-
+    const elevs = await getElevations(coords);
     content.innerHTML = "";
     const steps = [];
 

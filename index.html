@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>1-pathrotation</title>
+<title>2-pathrotation</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -772,6 +772,8 @@ let __searchSeq = 0;   // 🔒 hard cancel token
 const STATIC_ROUTE_DECORATORS = [];
 let lockRouteNorthUp = true;   // ⬅️ NEW
 let ROUTE_CONTROLS_ROTATION = true; // 🔒 only route logic can rotate map
+let lastMoveLatLng = null;
+let smoothedBearing = null;
 
 async function safeFetch(url, retries = 2) {
     return new Promise((resolve, reject) => {
@@ -1021,7 +1023,6 @@ approvalStartBtn.addEventListener("click", () => {
     try { map.removeControl(preview.rc); } catch {}
   }
   autoRotation = true;
-  rotateTowardRoute();
   follow = true;
   lastUserInteraction = Date.now();
 
@@ -1123,6 +1124,19 @@ function slopeBucket(slope){
   if (slope < -2.5) return "uphill";
   return "flat";
 }
+function computeBearing(from, to) {
+    const lat1 = from.lat * Math.PI / 180;
+    const lat2 = to.lat * Math.PI / 180;
+    const dLon = (to.lng - from.lng) * Math.PI / 180;
+
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x =
+        Math.cos(lat1) * Math.sin(lat2) -
+        Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
 // ==========================================================
 // VIRTUAL GPS — USED WHEN USER REFUSES GPS PERMISSION
 // ==========================================================
@@ -1207,6 +1221,7 @@ if (navigator.geolocation){
 
     await adaptiveAIDashboard(latlng, heading);
     smartStepAdvancement(latlng);
+    rotateTowardRouteLive(latlng);
     checkUpcomingSteps(latlng);
     maybeRepeatCurrentStep();
     // ===============================
@@ -1217,37 +1232,38 @@ if (navigator.geolocation){
 // ===============================
 // ROUTE-UP ROTATION (EXTRACTED)
 // ===============================
-function rotateTowardRoute() {
+function rotateTowardRouteLive(currentLatLng) {
     if (!autoRotation) return;
-    if (!routes.length || activeRouteIndex === null) return;
+    if (activeRouteIndex === null) return; // 🔴 ADD THIS
+    if (!currentLatLng) return;
 
-    const route = routes[activeRouteIndex];
-    if (!route.steps || route.steps.length < 2) return;
-
-    let p1, p2;
-
-    // current step → next step
-    if (route.steps[currentStepIndex + 1]) {
-        p1 = route.steps[currentStepIndex];
-        p2 = route.steps[currentStepIndex + 1];
-    }
-    // fallback for last step
-    else if (currentStepIndex > 0) {
-        p1 = route.steps[currentStepIndex - 1];
-        p2 = route.steps[currentStepIndex];
-    } else {
+    // First GPS fix
+    if (!lastMoveLatLng) {
+        lastMoveLatLng = currentLatLng;
         return;
     }
 
-    const angle =
-        Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI;
+    const rawBearing = computeBearing(lastMoveLatLng, currentLatLng);
 
-    map.setBearing((angle + 360) % 360, {
+    // Google Maps–style smoothing
+    const SMOOTH = 0.18;
+    if (smoothedBearing === null) {
+        smoothedBearing = rawBearing;
+    } else {
+        let delta = rawBearing - smoothedBearing;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        smoothedBearing += delta * SMOOTH;
+    }
+
+    map.setBearing(smoothedBearing, {
         animate: true,
-        duration: 700
+        duration: 250,
+        easing: "ease-out"
     });
-}
 
+    lastMoveLatLng = currentLatLng;
+}
 
 const compassBtn = document.getElementById("compass-btn");
 compassBtn.onclick = () => {
@@ -1276,8 +1292,9 @@ compassBtn.onclick = () => {
 
         ROUTE_CONTROLS_ROTATION = true; // 🔥 KEY FIX
         userHasTouchedMap = false;
-        map.stop();                     // 🧹 clear old bearing
-        requestAnimationFrame(() => rotateTowardRoute());
+        lastMoveLatLng = null;     // 🔴 ADD
+        smoothedBearing = null;    // 🔴 KEEP
+        map.stop(); 
 
         compassBtn.innerHTML = "🧭";
         compassBtn.style.background = "#00b36b";
@@ -1510,7 +1527,6 @@ function smartStepAdvancement(latlng) {
     if (autoRotation) {
         ROUTE_CONTROLS_ROTATION = true;   // 🔒 force route authority
         map.stop();                      // 🧹 clear inertial bearing
-        requestAnimationFrame(() => rotateTowardRoute());
     }
 
     // If this is the last step (destination)
@@ -1742,14 +1758,9 @@ async function adaptiveAIDashboard(latlng, heading) {
         // 1. Calculate distance from the "purple line"
         /*** 🚨 AUTO REROUTE ENGINE FIX 🚨 ***/
         const offDist = getNearestRouteDistance(latlng, route);
-        const isMoving = currentSpeed > 5; // km/h threshold
-        // Add cooldown tracking at top of file with other globals
-        let lastRerouteTime = 0;
-        const REROUTE_COOLDOWN = 15000; // 15 seconds minimum between reroutes
-
+        const isMoving = currentSpeed > 5; 
         // Reroute Condition
-        // Reroute Condition
-        if (offDist > 75 && isMoving && !route._isRerouting) {
+        if (offDist > 25 && isMoving && !route._isRerouting) {
             const now = Date.now();
             
             // ✅ Prevent spam rerouting
@@ -1909,15 +1920,16 @@ async function getEnglishName(lat, lon) {
 // 🔒 LOCK ROUTE + ARROWS NORTH-UP
 // ===============================
 map.on("rotate", () => {
-    // ❌ Do NOT cancel rotation when auto route-up is active
-    if (lockRouteNorthUp !== true || autoRotation) return;
+    if (!lockRouteNorthUp || autoRotation) return;
+
     const bearing = map.getBearing() || 0;
-    STATIC_ROUTE_DECORATORS.forEach(decorator => {
-        if (!decorator || !decorator._path) return;
-        decorator._path.style.transformOrigin = "50% 50%";
-        decorator._path.style.transform = `rotate(${-bearing}deg)`;
+    STATIC_ROUTE_DECORATORS.forEach(d => {
+        if (!d?._path) return;
+        d._path.style.transformOrigin = "50% 50%";
+        d._path.style.transform = `rotate(${-bearing}deg)`;
     });
 });
+
 
 // ======================================================
 // SAFE REROUTE ENGINE — preserves route box, index, color
@@ -2267,7 +2279,6 @@ async function createRoute(start, end, color, marker = null, index = null) {
       autoRotation = true;
       follow = true;
       autoCenter = true;
-      setTimeout(() => rotateTowardRoute(), 600);
       // Speak the first step immediately (even if translation is still loading)
       if (steps.length > 0) {
         const firstStep = steps[0];
@@ -2305,8 +2316,6 @@ async function createRoute(start, end, color, marker = null, index = null) {
         autoRotation = true;
         follow = true;
         autoCenter = true;
-
-        setTimeout(() => rotateTowardRoute(), 600);
     }
 
 

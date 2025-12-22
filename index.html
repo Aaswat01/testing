@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>2-reroutetest</title>
+<title>3-reroute-pathbearing</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -167,7 +167,7 @@ border:none;border-radius:1vh;padding:0.4vh 5vw;font-weight:bold;cursor:pointer;
 /* === ROUTE PANEL === */
 #routePanel {
   position: fixed;
-  bottom: 9vh; /* lifted above bottom UI elements */
+  bottom: 8vh; /* lifted above bottom UI elements */
   left: 2vw;
   width: 270px;
   max-height: 32vh; /* more height and scrollable */
@@ -682,6 +682,9 @@ const map = L.map('map', {
     rotateControl: true,
     inertia: true
 });
+// 🔝 Dedicated pane so route line never hides
+map.createPane("routePane");
+map.getPane("routePane").style.zIndex = 450;
 
 let autoCenter = true;
 const nightMap = L.tileLayer(
@@ -1195,7 +1198,10 @@ if (navigator.geolocation){
     } else {
       userMarker.setLatLng(latlng);
     }
-
+    // 🔥 TRIGGER ROTATION UPDATE HERE
+    if (autoRotation && activeRouteIndex !== null) {
+        rotateTowardRoute();
+    }
     // 🆕 Only follow when follow mode is active
     // Only center if user did NOT interact manually
     if (follow && autoCenter) {
@@ -1214,13 +1220,63 @@ if (navigator.geolocation){
     // ==============================
   }, console.warn, { enableHighAccuracy:true, maximumAge:1000, timeout:5000 });
 }
+
+// ==========================================
+// 🚀 NEW: CALCULATE BEARING 10m AHEAD ON PATH
+// ==========================================
+function getPathBearing(latlng, route) {
+    if (!route || !route.coordinates || route.coordinates.length < 2) return 0;
+
+    const coords = route.coordinates;
+    let closestDist = Infinity;
+    let closestIdx = route.lastClosestIndex || 0;
+
+    // optimization: only search forward from last known spot
+    // limit search window to next 50 points to save CPU
+    const searchLimit = Math.min(closestIdx + 50, coords.length);
+    
+    for (let i = closestIdx; i < searchLimit; i++) {
+        const d = map.distance(latlng, coords[i]);
+        if (d < closestDist) {
+            closestDist = d;
+            closestIdx = i;
+        }
+    }
+    
+    // Save index for next frame
+    route.lastClosestIndex = closestIdx;
+
+    // Look ahead ~15 meters (approx 2-3 coordinate points usually)
+    // We accumulate distance to be precise
+    let lookAheadIdx = closestIdx;
+    let distAccum = 0;
+    
+    while (lookAheadIdx < coords.length - 1 && distAccum < 15) {
+        distAccum += map.distance(coords[lookAheadIdx], coords[lookAheadIdx + 1]);
+        lookAheadIdx++;
+    }
+
+    // If we are at the very end, just use the last segment angle
+    if (lookAheadIdx === closestIdx && closestIdx < coords.length - 1) {
+        lookAheadIdx = closestIdx + 1;
+    }
+
+    const p1 = coords[closestIdx];
+    const p2 = coords[lookAheadIdx];
+
+    // Calculate Bearing
+    const angle = Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI;
+    return (angle + 360) % 360;
+}
 // ===============================
 // ROUTE-UP ROTATION (EXTRACTED)
 // ===============================
 function rotateTowardRoute() {
     if (!autoRotation) return;
     if (!routes.length || activeRouteIndex === null) return;
-
+    // 1. Get the target angle based on the path 10-15m ahead
+    const userLoc = userMarker ? userMarker.getLatLng() : map.getCenter();
+    const targetBearing = getPathBearing(userLoc, routes[activeRouteIndex]);
     const route = routes[activeRouteIndex];
     if (!route.steps || route.steps.length < 2) return;
 
@@ -1242,9 +1298,10 @@ function rotateTowardRoute() {
     const angle =
         Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI;
 
-    map.setBearing((angle + 360) % 360, {
+    map.setBearing(targetBearing,(angle + 360) % 360, {
         animate: true,
-        duration: 700
+        duration: 0.5, // Quick, smooth updates
+        easeLinearity: 0.2
     });
 }
 const compassBtn = document.getElementById("compass-btn");
@@ -1551,7 +1608,6 @@ function checkUpcomingSteps(latlng) {
 }
 
 function cleanupRoute(route) {
-  try { map.removeControl(route.rc); } catch {}
   try { map.removeLayer(route.group); } catch {}
   const destIndex = waypointMarkers.length - 1;
   if (waypointMarkers[destIndex]) {
@@ -1939,16 +1995,23 @@ async function safeReroute(route, currentLL) {
             }
             const r = result[0];
             // ===============================
-            // 🔥 FIX: DRAW MAIN REROUTE POLYLINE
+            // 🔥 FIXED: MAIN REROUTE POLYLINE (ALWAYS VISIBLE)
             // ===============================
             const mainRouteLine = L.polyline(
                 r.coordinates.map(c => [c.lat, c.lng]),
                 {
+                    pane: "routePane",   // 🔑 CRITICAL
                     color: route.color,
-                    weight: 6,        // slightly thicker than step lines
-                    opacity: 0.9
+                    weight: 7,           // thicker
+                    opacity: 1,
+                    dashArray: null,     // 🔑 NO DASH
+                    lineCap: "round",
+                    lineJoin: "round"
                 }
             ).addTo(newGroup);
+
+            // store for cleanup
+            route.mainLine = mainRouteLine;
 
             // 🔒 store reference for cleanup (does NOT affect logic)
             route.mainLine = mainRouteLine;
@@ -1986,9 +2049,11 @@ async function safeReroute(route, currentLL) {
                 const elev = elevs[idxStart] || 0;
 
                 const stepLine = L.polyline(seg, {
+                    pane: "overlayPane",   // 👈 keep steps lower
                     color: route.color,
-                    weight: 5,
-                    opacity: 0.8
+                    weight: 4,
+                    opacity: 0.6,
+                    dashArray: "8 6"
                 }).addTo(newGroup);
                 const stepArrow = addPolylineArrows(stepLine, newGroup);
                 if (stepArrow) STATIC_ROUTE_DECORATORS.push(stepArrow);
@@ -2044,18 +2109,19 @@ function addPolylineArrows(polyline, group) {
     if (!polyline || !group) return null;
 
     const decorator = L.polylineDecorator(polyline, {
+        pane: "markerPane",   // 🔝 always on top
         patterns: [{
-            offset: 30,
-            repeat: 80,
+            offset: 25,
+            repeat: 70,
             symbol: L.Symbol.arrowHead({
-                pixelSize: 14,        // 🔥 cleaner & bolder
-                headAngle: 45,
-                polygon: false,       // Google-style open arrow
+                pixelSize: 25,      // ⬆️ bigger
+                headAngle: 50,
+                polygon: false,
                 pathOptions: {
                     stroke: true,
-                    color: "#ffffff",
-                    weight: 2.6,
-                    opacity: 0.95,
+                    color: "#000000", // 🖤 BLACK
+                    weight: 4.2,      // ⬆️ thicker
+                    opacity: 2,
                     lineCap: "round",
                     lineJoin: "round"
                 }
@@ -2270,7 +2336,7 @@ async function createRoute(start, end, color, marker = null, index = null) {
       }
     }
 
-    const routeObj = { rc, group, steps, endKey, routeIndex, totalDistance: r.summary.totalDistance };
+    const routeObj = { rc, group, steps, endKey, routeIndex, totalDistance: r.summary.totalDistance, coordinates: coords,lastClosestIndex: 0};
 
     // 🔥 REGISTER ROUTE FIRST
     const existing = routes.find(x => x.routeIndex === routeIndex);

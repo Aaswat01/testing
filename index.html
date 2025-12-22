@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>1-reroutetest</title>
+<title>2-reroutetest</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -771,9 +771,7 @@ let __searchSeq = 0;   // 🔒 hard cancel token
 // 🔒 Track all arrow decorators for rotation cancel
 const STATIC_ROUTE_DECORATORS = [];
 let lockRouteNorthUp = true;   // ⬅️ NEW
-let ROUTE_CONTROLS_ROTATION = true; // 🔒 only route logic can rotate map
-let lastMoveLatLng = null;
-let smoothedBearing = null;
+
 
 async function safeFetch(url, retries = 2) {
     return new Promise((resolve, reject) => {
@@ -1023,6 +1021,7 @@ approvalStartBtn.addEventListener("click", () => {
     try { map.removeControl(preview.rc); } catch {}
   }
   autoRotation = true;
+  rotateTowardRoute();
   follow = true;
   lastUserInteraction = Date.now();
 
@@ -1125,18 +1124,7 @@ function slopeBucket(slope){
   if (slope < -2.5) return "uphill";
   return "flat";
 }
-function computeBearing(from, to) {
-    const lat1 = from.lat * Math.PI / 180;
-    const lat2 = to.lat * Math.PI / 180;
-    const dLon = (to.lng - from.lng) * Math.PI / 180;
 
-    const y = Math.sin(dLon) * Math.cos(lat2);
-    const x =
-        Math.cos(lat1) * Math.sin(lat2) -
-        Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-
-    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-}
 
 // ==========================================================
 // VIRTUAL GPS — USED WHEN USER REFUSES GPS PERMISSION
@@ -1196,15 +1184,11 @@ if (navigator.geolocation){
     let heading = pos.coords.heading;
 
     // 🔒 Prevent car heading from affecting map rotation
-    if (!ROUTE_CONTROLS_ROTATION) {
-        if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
-            heading = lastHeading || 0;
-        }
-        lastHeading = heading;
-    } else {
-        // Route controls rotation → ignore heading memory
-        lastHeading = 0;
+    const MIN_SPEED_FOR_HEADING = 5/3.6;
+    if (heading == null || currentSpeed < MIN_SPEED_FOR_HEADING) {
+      heading = lastHeading || 0;
     }
+    lastHeading = heading;
     if(!userMarker){
       userMarker = L.marker(latlng,{icon:carIcon}).addTo(map);
       map.setView(latlng, 19);
@@ -1233,39 +1217,36 @@ if (navigator.geolocation){
 // ===============================
 // ROUTE-UP ROTATION (EXTRACTED)
 // ===============================
-function rotateTowardRouteLive(currentLatLng) {
+function rotateTowardRoute() {
     if (!autoRotation) return;
-    if (activeRouteIndex === null) return; // 🔴 ADD THIS
-    if (!currentLatLng) return;
+    if (!routes.length || activeRouteIndex === null) return;
 
-    // First GPS fix
-    if (!lastMoveLatLng) {
-        lastMoveLatLng = currentLatLng;
+    const route = routes[activeRouteIndex];
+    if (!route.steps || route.steps.length < 2) return;
+
+    let p1, p2;
+
+    // current step → next step
+    if (route.steps[currentStepIndex + 1]) {
+        p1 = route.steps[currentStepIndex];
+        p2 = route.steps[currentStepIndex + 1];
+    }
+    // fallback for last step
+    else if (currentStepIndex > 0) {
+        p1 = route.steps[currentStepIndex - 1];
+        p2 = route.steps[currentStepIndex];
+    } else {
         return;
     }
 
-    const rawBearing = computeBearing(lastMoveLatLng, currentLatLng);
+    const angle =
+        Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI;
 
-    // Google Maps–style smoothing
-    const SMOOTH = 0.18;
-    if (smoothedBearing === null) {
-        smoothedBearing = rawBearing;
-    } else {
-        let delta = rawBearing - smoothedBearing;
-        if (delta > 180) delta -= 360;
-        if (delta < -180) delta += 360;
-        smoothedBearing += delta * SMOOTH;
-    }
-
-    map.setBearing(smoothedBearing, {
+    map.setBearing((angle + 360) % 360, {
         animate: true,
-        duration: 250,
-        easing: "ease-out"
+        duration: 700
     });
-
-    lastMoveLatLng = currentLatLng;
 }
-
 const compassBtn = document.getElementById("compass-btn");
 compassBtn.onclick = () => {
     compassMode = (compassMode + 1) % 2;
@@ -1274,8 +1255,6 @@ compassBtn.onclick = () => {
     if (compassMode === 0) {
         if (compassMode === 0) autoRotation = false;
         lockRouteNorthUp = true;   // ✅ ADD THIS
-        autoRotation = false;
-        ROUTE_CONTROLS_ROTATION = false; // 🔓 allow manual/north only
         follow = true;
         autoCenter = true;
 
@@ -1291,17 +1270,13 @@ compassBtn.onclick = () => {
         follow = true;
         autoCenter = true;
 
-        ROUTE_CONTROLS_ROTATION = true; // 🔥 KEY FIX
-        userHasTouchedMap = false;
-        lastMoveLatLng = null;     // 🔴 ADD
-        smoothedBearing = null;    // 🔴 KEEP
-        map.stop(); 
+        userHasTouchedMap = false; // 🔥 important
+        requestAnimationFrame(() => rotateTowardRoute());
 
         compassBtn.innerHTML = "🧭";
         compassBtn.style.background = "#00b36b";
     }
 };
-
 
 // keep map centered automatically if follow mode is ON
 setInterval(() => {
@@ -1583,6 +1558,10 @@ function cleanupRoute(route) {
     map.removeLayer(waypointMarkers[destIndex]);
     waypointMarkers.splice(destIndex, 1);
     waypoints.splice(destIndex + 1, 1);
+  }
+  if (route.mainLine) {
+      try { route.mainLine.remove(); } catch {}
+      route.mainLine = null;
   }
   const box = document.getElementById(`route-box-${route.routeIndex}`);
   if (box) box.remove();
@@ -1921,17 +1900,15 @@ async function getEnglishName(lat, lon) {
 // 🔒 LOCK ROUTE + ARROWS NORTH-UP
 // ===============================
 map.on("rotate", () => {
-    if (!lockRouteNorthUp || autoRotation) return;
-
+    // ❌ Do NOT cancel rotation when auto route-up is active
+    if (lockRouteNorthUp !== true || autoRotation) return;
     const bearing = map.getBearing() || 0;
-    STATIC_ROUTE_DECORATORS.forEach(d => {
-        if (!d?._path) return;
-        d._path.style.transformOrigin = "50% 50%";
-        d._path.style.transform = `rotate(${-bearing}deg)`;
+    STATIC_ROUTE_DECORATORS.forEach(decorator => {
+        if (!decorator || !decorator._path) return;
+        decorator._path.style.transformOrigin = "50% 50%";
+        decorator._path.style.transform = `rotate(${-bearing}deg)`;
     });
 });
-
-
 // ======================================================
 // SAFE REROUTE ENGINE — preserves route box, index, color
 // ======================================================
@@ -1961,6 +1938,20 @@ async function safeReroute(route, currentLL) {
                 return;
             }
             const r = result[0];
+            // ===============================
+            // 🔥 FIX: DRAW MAIN REROUTE POLYLINE
+            // ===============================
+            const mainRouteLine = L.polyline(
+                r.coordinates.map(c => [c.lat, c.lng]),
+                {
+                    color: route.color,
+                    weight: 6,        // slightly thicker than step lines
+                    opacity: 0.9
+                }
+            ).addTo(newGroup);
+
+            // 🔒 store reference for cleanup (does NOT affect logic)
+            route.mainLine = mainRouteLine;
 
             // 6️⃣ Build steps again into SAME box
             const content = document.querySelector(
@@ -2260,6 +2251,7 @@ async function createRoute(start, end, color, marker = null, index = null) {
       autoRotation = true;
       follow = true;
       autoCenter = true;
+      setTimeout(() => rotateTowardRoute(), 600);
       // Speak the first step immediately (even if translation is still loading)
       if (steps.length > 0) {
         const firstStep = steps[0];
@@ -2297,6 +2289,7 @@ async function createRoute(start, end, color, marker = null, index = null) {
         autoRotation = true;
         follow = true;
         autoCenter = true;
+        setTimeout(() => rotateTowardRoute(), 600);
     }
 
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>3-reroute-pathbearing</title>
+<title>4-reroute-pathbearing</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -927,6 +927,8 @@ const OSRM_ROUTER = L.Routing.osrmv1({
   timeout: 15000,  // 15 second timeout
   profile: 'driving'
 });
+// 🔒 Protect main route polylines from fade/removal
+const MAIN_ROUTE_LINES = new Set();
 
 // ✅ CRITICAL: Override the buildRouteUrl method to fix the /undefined/ bug
 OSRM_ROUTER.buildRouteUrl = function(waypoints, options) {
@@ -1127,7 +1129,17 @@ function slopeBucket(slope){
   if (slope < -2.5) return "uphill";
   return "flat";
 }
+// ===============================
+// 🧠 IDLE AUTO-RECENTER SYSTEM
+// ===============================
+const IDLE_RECENTER_DELAY = 5000; // 5 seconds
+let lastDashboardInteraction = Date.now();
 
+// ===============================
+// AUTO RETURN TO NORTH-UP
+// ===============================
+const AUTO_NORTHUP_DELAY = 5000; // 5 seconds
+let lastMapInteraction = Date.now();
 
 // ==========================================================
 // VIRTUAL GPS — USED WHEN USER REFUSES GPS PERMISSION
@@ -1162,21 +1174,62 @@ map.on("movestart", (e) => {
     }
 });
 
-map.on("dragstart", () => {
-    follow = false;
-    autoCenter = false;
-    userHasTouchedMap = true;
-
-    // ⛔ only disable rotation in north-up
-    if (compassMode === 0) autoRotation = false;
+["dragstart", "zoomstart", "rotatestart", "mousedown", "touchstart"].forEach(evt => {
+    map.on(evt, () => {
+        lastDashboardInteraction = Date.now();
+        follow = false;
+        autoCenter = false;
+        userHasTouchedMap = true;
+    });
 });
 
 
-// Resume rotation after 2s if user stops interacting
-// 🆕 Resume follow ONLY if 1 minute passes without interaction
-map.on("dragend zoomend rotateend", () => {
-    lastUserInteraction = Date.now();
-});
+// ============================================
+// 🚗 AUTO RECENTER CAR AFTER IDLE
+// ============================================
+setInterval(() => {
+    if (!userMarker) return;
+
+    const idleTime = Date.now() - lastDashboardInteraction;
+
+    // Still interacting → do nothing
+    if (idleTime < IDLE_RECENTER_DELAY) return;
+
+    // Already centered → skip
+    if (follow && autoCenter && !userHasTouchedMap) return;
+
+    // 🔥 FORCE RECENTER
+    follow = true;
+    autoCenter = true;
+    userHasTouchedMap = false;
+
+    map.flyTo(
+        userMarker.getLatLng(),
+        map.getZoom(),
+        { animate: true, duration: 0.8 }
+    );
+
+}, 800);
+
+
+
+// ============================================
+// 🔒 FORCE RECENTER + ZOOM (SAFE, CENTRALIZED)
+// ============================================
+function forceRecenterToCar(zoomLevel = 18) {
+    if (!userMarker) return;
+
+    userHasTouchedMap = false;
+    follow = true;
+    autoCenter = true;
+
+    map.flyTo(
+        userMarker.getLatLng(),
+        zoomLevel,
+        { animate: true, duration: 0.8 }
+    );
+}
+
 // Modify GPS watcher to detect permission denial
 if (navigator.geolocation){
   navigator.geolocation.watchPosition(async pos=>{
@@ -1202,12 +1255,9 @@ if (navigator.geolocation){
     if (autoRotation && activeRouteIndex !== null) {
         rotateTowardRoute();
     }
-    // 🆕 Only follow when follow mode is active
     // Only center if user did NOT interact manually
     if (follow && autoCenter) {
-        if (!userHasTouchedMap) {
-            map.setView(latlng, map.getZoom(), { animate: true });
-        }
+        map.setView(latlng, map.getZoom(), { animate: true });
     }
 
     await adaptiveAIDashboard(latlng, heading);
@@ -1334,13 +1384,6 @@ compassBtn.onclick = () => {
         compassBtn.style.background = "#00b36b";
     }
 };
-
-// keep map centered automatically if follow mode is ON
-setInterval(() => {
-    if (follow && autoCenter && userMarker && !userHasTouchedMap) {
-        map.panTo(userMarker.getLatLng(), { animate: true });
-    }
-}, 4000);
 
 // === Speed Limit (Overpass API - Real Data Only) ===
 let lastSpeedLimit = null;
@@ -1489,39 +1532,6 @@ function findCurrentStepByLocation(latlng, route) {
   
   return closestStepIndex >= 0 ? { index: closestStepIndex, distance: closestDistance } : null;
 }
-// ===============================
-// STEP LINE FADE / ERASE ANIMATION
-// ===============================
-function fadeOutStepLine(line, duration = 700) {
-    if (!line) return;
-
-    const start = performance.now();
-    const initialOpacity = line.options.opacity ?? 0.8;
-    const initialWeight = line.options.weight ?? 5;
-
-    function animate(now) {
-        const progress = Math.min((now - start) / duration, 1);
-
-        const newOpacity = initialOpacity * (1 - progress);
-        const newWeight = Math.max(1, initialWeight * (1 - progress));
-
-        line.setStyle({
-            opacity: newOpacity,
-            weight: newWeight
-        });
-
-        if (progress < 1) {
-            requestAnimationFrame(animate);
-        } else {
-            // fully remove after fade
-            try {
-                line.remove();
-            } catch {}
-        }
-    }
-
-    requestAnimationFrame(animate);
-}
 
 // 🆕 SMART STEP ADVANCEMENT
 // Handles skipping missed steps and announcing current location
@@ -1618,6 +1628,9 @@ function cleanupRoute(route) {
   if (route.mainLine) {
       try { route.mainLine.remove(); } catch {}
       route.mainLine = null;
+  }
+  if (route.mainLine) {
+      MAIN_ROUTE_LINES.delete(route.mainLine);
   }
   const box = document.getElementById(`route-box-${route.routeIndex}`);
   if (box) box.remove();
@@ -1794,7 +1807,7 @@ async function adaptiveAIDashboard(latlng, heading) {
         // 1. Calculate distance from the "purple line"
         /*** 🚨 AUTO REROUTE ENGINE FIX 🚨 ***/
         const offDist = getNearestRouteDistance(latlng, route);
-        const isMoving = currentSpeed > 5; 
+        const isMoving = currentSpeed > 15; 
         // Reroute Condition
         if (offDist > 25 && isMoving && !route._isRerouting) {
             const now = Date.now();
@@ -1872,7 +1885,6 @@ function animateMarker(timestamp) {
 setInterval(() => {
     if (!userMarker || useVirtualGPS) return;
     // Prevent snapping map every loop when user is interacting
-    if (userHasTouchedMap) return;
     const latlng = userMarker.getLatLng();
     adaptiveAIDashboard(latlng, lastHeading);
 }, 900);
@@ -1885,6 +1897,7 @@ async function updateDriverCountry(latlng) {
     driverCountry = data.address && (data.address.country_code || "").toUpperCase();
   } catch (err) { console.warn("Country fetch failed:", err); }
 }
+
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
@@ -1952,19 +1965,7 @@ async function getEnglishName(lat, lon) {
   window._roadCache[key] = "Unnamed Road";
   return "Unnamed Road";
 }
-// ===============================
-// 🔒 LOCK ROUTE + ARROWS NORTH-UP
-// ===============================
-map.on("rotate", () => {
-    // ❌ Do NOT cancel rotation when auto route-up is active
-    if (lockRouteNorthUp !== true || autoRotation) return;
-    const bearing = map.getBearing() || 0;
-    STATIC_ROUTE_DECORATORS.forEach(decorator => {
-        if (!decorator || !decorator._path) return;
-        decorator._path.style.transformOrigin = "50% 50%";
-        decorator._path.style.transform = `rotate(${-bearing}deg)`;
-    });
-});
+
 // ======================================================
 // SAFE REROUTE ENGINE — preserves route box, index, color
 // ======================================================
@@ -1976,8 +1977,6 @@ async function safeReroute(route, currentLL) {
     // 1️⃣ Get destination (last step)
     const lastStep = route.steps[route.steps.length - 1];
     const destLL = L.latLng(lastStep.lat, lastStep.lng);
-
-    // 2️⃣ Remove only the OLD line + step layers
     try { map.removeControl(route.rc); } catch {}
     try { route.group.clearLayers();} catch {}
 
@@ -2009,12 +2008,14 @@ async function safeReroute(route, currentLL) {
                     lineJoin: "round"
                 }
             ).addTo(newGroup);
-
-            // store for cleanup
-            route.mainLine = mainRouteLine;
+            MAIN_ROUTE_LINES.add(mainRouteLine);
 
             // 🔒 store reference for cleanup (does NOT affect logic)
             route.mainLine = mainRouteLine;
+            // 🆕 Force recenter + zoom after reroute
+            setTimeout(() => forceRecenterToCar(19), 300);
+            autoRotation = true;
+            requestAnimationFrame(() => rotateTowardRoute());
 
             // 6️⃣ Build steps again into SAME box
             const content = document.querySelector(
@@ -2114,7 +2115,7 @@ function addPolylineArrows(polyline, group) {
             offset: 25,
             repeat: 70,
             symbol: L.Symbol.arrowHead({
-                pixelSize: 25,      // ⬆️ bigger
+                pixelSize: 17,      // ⬆️ bigger
                 headAngle: 50,
                 polygon: false,
                 pathOptions: {
@@ -2318,6 +2319,7 @@ async function createRoute(start, end, color, marker = null, index = null) {
       follow = true;
       autoCenter = true;
       setTimeout(() => rotateTowardRoute(), 600);
+      forceRecenterToCar(18); // 🆕 recenter + zoom when route starts
       // Speak the first step immediately (even if translation is still loading)
       if (steps.length > 0) {
         const firstStep = steps[0];
@@ -2356,6 +2358,7 @@ async function createRoute(start, end, color, marker = null, index = null) {
         follow = true;
         autoCenter = true;
         setTimeout(() => rotateTowardRoute(), 600);
+        forceRecenterToCar(18); // 🆕 recenter + zoom when route starts
     }
 
 

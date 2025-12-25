@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>7-reroute-pathbearing</title>
+<title>8-reroute-pathbearing</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -1245,23 +1245,15 @@ if (navigator.geolocation){
       heading = lastHeading || 0;
     }
     lastHeading = heading;
-    if (!userMarker) {
-        userMarker = L.marker(latlng, {
-            icon: carIcon,
-            interactive: false
-        }).addTo(map);
+    if(!userMarker){
+      userMarker = L.marker(latlng,{icon:carIcon}).addTo(map);
+    } else {
+      userMarker.setLatLng(latlng);
     }
-
-    // 🔥 HARD-LOCK: car stays fixed in center
-    userMarker.setLatLng(latlng);
-    if (autoRotation && activeRouteIndex !== null) {
-        rotateTowardRoute();
-    }
-
     map.setView(
-        latlng,
-        map.getZoom(),
-        { animate: true, duration: 0.25 }
+      latlng,
+      map.getZoom(),
+      { animate: true, duration: 0.25 }
     );
     // 🔥 TRIGGER ROTATION UPDATE HERE
     if (autoRotation && activeRouteIndex !== null) {
@@ -1284,7 +1276,7 @@ if (navigator.geolocation){
 }
 
 // ==========================================
-// 🚀 FIXED: CALCULATE BEARING FOR "HEADS UP" DISPLAY
+// 🚀 NEW: CALCULATE BEARING 10m AHEAD ON PATH
 // ==========================================
 function getPathBearing(latlng, route) {
     if (!route || !route.coordinates || route.coordinates.length < 2) return 0;
@@ -1354,7 +1346,6 @@ function rotateTowardRoute() {
         easeLinearity: 0.15
     });
 }
-
 const compassBtn = document.getElementById("compass-btn");
 compassBtn.onclick = () => {
     compassMode = (compassMode + 1) % 2;
@@ -1529,6 +1520,9 @@ function findCurrentStepByLocation(latlng, route) {
 
     return bestIndex >= 0 ? { index: bestIndex, distance: bestDist } : null;
 }
+
+// 🆕 SMART STEP ADVANCEMENT
+// Handles skipping missed steps and announcing current location
 
 // ==========================================
 // 🚀 FIXED: STEP ADVANCEMENT & DESTINATION ARRIVAL
@@ -1791,14 +1785,42 @@ function distanceToSegment(p, a, b) {
     // Return distance in meters (approximate conversion)
     return L.latLng(x, y).distanceTo(L.latLng(xx, yy));
 }
-function triggerReroute(currentLL, route) {
-    speak("Recalculating route.", "warning", { interrupt: true });
+// ======================================================
+// SIMPLE REROUTE — rebuild route from scratch
+// ======================================================
+async function triggerReroute(route, currentLL) {
 
+    // must have a valid route
+    if (!route || !route.steps || !route.steps.length) return;
+
+    // destination = last step of route
     const lastStep = route.steps[route.steps.length - 1];
     const destLL = L.latLng(lastStep.lat, lastStep.lng);
 
-    safeReroute(route, currentLL, destLL); 
+    // keep color + index
+    const routeIndex = route.routeIndex;
+    const color = route.color || colors[routeIndex % colors.length];
+
+    // remove old route layers safely
+    try { map.removeLayer(route.group); } catch {}
+    try { map.removeControl(route.rc); } catch {}
+
+    // rebuild using SAME route index
+    createRoute(
+        currentLL,
+        destLL,
+        color,
+        null,
+        routeIndex
+    );
+
+    speak("Route updated.", "step", { interrupt: true });
+
+    // recenter + rotate
+    forceRecenterToCar(18);
+    requestAnimationFrame(() => rotateTowardRoute());
 }
+
 
 // ===== Main AI loop =====
 async function adaptiveAIDashboard(latlng, heading) {
@@ -1825,25 +1847,17 @@ async function adaptiveAIDashboard(latlng, heading) {
     // 🆕 ROBUST OFF-ROUTE DETECTION
     if (activeRouteIndex !== null && routes[activeRouteIndex]) {
         const route = routes[activeRouteIndex];
-        
-        // 1. Calculate distance from the "purple line"
         /*** 🚨 AUTO REROUTE ENGINE FIX 🚨 ***/
         const offDist = getNearestRouteDistance(latlng, route);
         const isMoving = currentSpeed > 15; 
         // Reroute Condition
-        if (offDist > 15 && isMoving) {
+        if (offDist > 20 && isMoving) {
             const now = Date.now();
-            
-            // ✅ Prevent spam rerouting
-            if (now - lastRerouteTime < REROUTE_COOLDOWN) {
-                console.log("⏳ Reroute on cooldown, waiting...");
-                return;
-            }
-            
+            if (now - lastRerouteTime < REROUTE_COOLDOWN) return;
             lastRerouteTime = now;
-            console.warn(`👉 Off-route detected (${offDist.toFixed(1)}m) – recalculating route...`);
-
-}
+            console.warn(`👉 Off-route detected (${offDist.toFixed(1)}m) – rebuilding route...`);
+            triggerReroute(route, latlng);
+        }
     }
     // 🆕 Check for upcoming step announcements
     checkUpcomingSteps(latlng);
@@ -1858,10 +1872,11 @@ async function adaptiveAIDashboard(latlng, heading) {
         const stepLL = L.latLng(curStep.lat, curStep.lng);
         remainingDist += latlng.distanceTo(stepLL);
 
-        // distance of remaining steps
+        // total remaining steps
         for (let i = currentStepIndex + 1; i < steps.length; i++) {
             remainingDist += steps[i].distance;
         }
+
         const km = (remainingDist / 1000).toFixed(1);
         const distanceEl = document.getElementById(`route-distance-${routeDisplayIndex}`);
         if (distanceEl) distanceEl.textContent = `${km} km remaining`;
@@ -1983,161 +1998,6 @@ async function getEnglishName(lat, lon) {
   return "Unnamed Road";
 }
 
-// ======================================================
-// SAFE REROUTE ENGINE — preserves route box, index, color
-// ======================================================
-async function safeReroute(route, currentLL) {
-    const routeIndex = route.routeIndex;
-
-    speak("Recalculating route.", "warning", { interrupt: true });
-
-    // 1️⃣ Get destination (last step)
-    if (!route || !route.steps?.length) return;
-    const lastStep = route.steps[route.steps.length - 1];
-    const destLL = L.latLng(lastStep.lat, lastStep.lng);
-
-    // 🔒 KEEP OLD ROUTE REFERENCES (DO NOT REMOVE YET)
-    const oldGroup = route.group;
-    const oldRc = route.rc;
-    const oldMainLine = route.mainLine;
-
-    // 🆕 Create new group (do NOT assign to route yet)
-    const newGroup = L.layerGroup().addTo(map);
-
-    // 4️⃣ Generate new route using OSRM
-    OSRM_ROUTER.route(
-        [{ latLng: currentLL }, { latLng: destLL }],
-        async (err, result) => {
-            if (err || !result || !result[0]) {
-                console.warn("Rerouting failed", err);
-                try { map.removeLayer(newGroup); } catch {}
-                return;
-            }
-
-            const r = result[0];
-
-            // ===============================
-            // 🔥 MAIN REROUTE POLYLINE
-            // ===============================
-            const coords = r.coordinates.map(c => ({
-                lat: c.lat,
-                lng: c.lng
-            }));
-
-            const mainRouteLine = L.polyline(
-                coords.map(c => [c.lat, c.lng]),
-                {
-                    pane: "routePane",
-                    color: route.color,
-                    weight: 8,
-                    opacity: 0.95,
-                    dashArray: null,
-                    lineCap: "round",
-                    lineJoin: "round"
-                }
-            ).addTo(newGroup);
-            MAIN_ROUTE_LINES.add(mainRouteLine);
-
-            // ===============================
-            // ✅ SAFE SWAP (SIR'S FIX)
-            // ===============================
-            try { if (oldRc) map.removeControl(oldRc); } catch {}
-            try { if (oldGroup) map.removeLayer(oldGroup); } catch {}
-            if (oldMainLine) MAIN_ROUTE_LINES.delete(oldMainLine);
-
-            route.group = newGroup;
-            route.rc = null;
-            route.mainLine = mainRouteLine;
-            route.coordinates = coords;     // 🔥 CRITICAL
-            route.lastClosestIndex = 0;
-            requestAnimationFrame(() => rotateTowardRoute());
-            // 🆕 Force recenter + rotation
-            setTimeout(() => forceRecenterToCar(19), 300);
-            autoRotation = true;
-            
-            // ===============================
-            // 6️⃣ Rebuild steps UI + layers
-            // ===============================
-            const content = document.querySelector(
-                `#route-box-${routeIndex} .route-content`
-            );
-            const distanceEl = document.getElementById(
-                `route-distance-${routeIndex}`
-            );
-
-            content.innerHTML = "";
-            route.steps = [];
-
-            const elevs = await getElevations(coords);
-
-            r.instructions.forEach((s, i) => {
-                const idxStart = s.index;
-                const idxEnd =
-                    i + 1 < r.instructions.length
-                        ? r.instructions[i + 1].index
-                        : coords.length;
-
-                const seg = coords
-                    .slice(idxStart, idxEnd)
-                    .map(c => [c.lat, c.lng]);
-
-                const elev = elevs[idxStart] || 0;
-
-                const stepLine = L.polyline(seg, {
-                    pane: "shadowPane",
-                    color: route.color,
-                    weight: 4,
-                    opacity: 0.6,
-                    dashArray: "8 6"
-                }).addTo(newGroup);
-
-                const stepArrow = addPolylineArrows(stepLine, newGroup);
-                if (stepArrow) STATIC_ROUTE_DECORATORS.push(stepArrow);
-
-                const item = document.createElement("div");
-                item.className = "route-step";
-                item.innerHTML = `
-                    <b>${s.text}</b>
-                    <div>${(s.distance / 1000).toFixed(2)} km | Elev ${elev.toFixed(1)} m</div>
-                `;
-                content.appendChild(item);
-
-                route.steps.push({
-                    lat: coords[idxStart].lat,
-                    lng: coords[idxStart].lng,
-                    text: s.text,
-                    elev,
-                    element: item,
-                    distance: s.distance,
-                    lineLayer: stepLine,
-                    arrowLayer: stepArrow,
-                    translated: false
-                });
-            });
-
-            // 7️⃣ Reset state
-            activeRouteIndex = routeIndex;
-            currentStepIndex = 0;
-            announcedSteps.clear();
-
-            // 8️⃣ Distance display
-            distanceEl.textContent =
-                `${(r.summary.totalDistance / 1000).toFixed(1)} km remaining`;
-
-            // 9️⃣ Announce first step
-            if (route.steps[0]) {
-                speak(route.steps[0].text, "step", { interrupt: true });
-            }
-        }
-    );
-}
-
-// ======================================================
-// OVERRIDE OLD REROUTE TRIGGER
-// ======================================================
-function triggerReroute(currentLL, route) {
-    safeReroute(route, currentLL);
-}
 // ===============================
 // POLYLINE DECORATOR ARROWS (IMPROVED)
 // ===============================

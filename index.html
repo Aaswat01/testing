@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>4-reroute-pathbearing</title>
+<title>5-reroute-pathbearing</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -767,7 +767,7 @@ const MAX_REQUESTS = 6;     // safe limit
 const REQUEST_DELAY = 120;  // ms delay between API queues
 // Add cooldown tracking for reroute
 let lastRerouteTime = 0;
-const REROUTE_COOLDOWN = 15000; // 15 seconds
+const REROUTE_COOLDOWN = 10000; // 15 seconds
 const requestQueue = [];
 let isProcessingQueue = false;
 let __searchSeq = 0;   // 🔒 hard cancel token
@@ -1245,12 +1245,24 @@ if (navigator.geolocation){
       heading = lastHeading || 0;
     }
     lastHeading = heading;
-    if(!userMarker){
-      userMarker = L.marker(latlng,{icon:carIcon}).addTo(map);
-      map.setView(latlng, 19);
-    } else {
-      userMarker.setLatLng(latlng);
+    if (!userMarker) {
+        userMarker = L.marker(latlng, {
+            icon: carIcon,
+            interactive: false
+        }).addTo(map);
     }
+
+    // 🔥 HARD-LOCK: car stays fixed in center
+    userMarker.setLatLng(latlng);
+    if (autoRotation && activeRouteIndex !== null) {
+        rotateTowardRoute();
+    }
+
+    map.setView(
+        latlng,
+        map.getZoom(),
+        { animate: true, duration: 0.25 }
+    );
     // 🔥 TRIGGER ROTATION UPDATE HERE
     if (autoRotation && activeRouteIndex !== null) {
         rotateTowardRoute();
@@ -1328,36 +1340,21 @@ function getPathBearing(latlng, route) {
 function rotateTowardRoute() {
     if (!autoRotation) return;
     if (!routes.length || activeRouteIndex === null) return;
-    // 1. Get the target angle based on the path 10-15m ahead
-    const userLoc = userMarker ? userMarker.getLatLng() : map.getCenter();
-    const targetBearing = getPathBearing(userLoc, routes[activeRouteIndex]);
+
     const route = routes[activeRouteIndex];
-    if (!route.steps || route.steps.length < 2) return;
+    if (!route.coordinates || route.coordinates.length < 2) return;
 
-    let p1, p2;
+    const userLoc = userMarker ? userMarker.getLatLng() : map.getCenter();
+    const bearing = getPathBearing(userLoc, route);
 
-    // current step → next step
-    if (route.steps[currentStepIndex + 1]) {
-        p1 = route.steps[currentStepIndex];
-        p2 = route.steps[currentStepIndex + 1];
-    }
-    // fallback for last step
-    else if (currentStepIndex > 0) {
-        p1 = route.steps[currentStepIndex - 1];
-        p2 = route.steps[currentStepIndex];
-    } else {
-        return;
-    }
-
-    const angle =
-        Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI;
-
-    map.setBearing(targetBearing,(angle + 360) % 360, {
+    // 🔥 Make path ALWAYS point straight UP (like Google Maps)
+    map.setBearing(bearing, {
         animate: true,
-        duration: 0.5, // Quick, smooth updates
-        easeLinearity: 0.2
+        duration: 0.35,
+        easeLinearity: 0.15
     });
 }
+
 const compassBtn = document.getElementById("compass-btn");
 compassBtn.onclick = () => {
     compassMode = (compassMode + 1) % 2;
@@ -1545,23 +1542,45 @@ function smartStepAdvancement(latlng) {
   const route = routes[activeRouteIndex];
   const steps = route.steps;
   
-  // 🏁 HARD FINAL DESTINATION CHECK
+  // 🏁 FINAL DESTINATION CHECK (MULTI-ROUTE SAFE)
   if (activeRouteIndex !== null && routes[activeRouteIndex]) {
-      const route = routes[activeRouteIndex];
-      const lastStep = route.steps[route.steps.length - 1];
-      const endLL = L.latLng(lastStep.lat, lastStep.lng);
 
-      const distToEnd = latlng.distanceTo(endLL);
+      const r = routes[activeRouteIndex];
+      if (!r.steps || r.steps.length === 0) return;
+      const finalStep = r.steps[r.steps.length - 1];
+      const destLL = L.latLng(finalStep.lat, finalStep.lng);
+      const dist = latlng.distanceTo(destLL);
+      // Within 28m = destination reached
+      if (dist <= 28) {
 
-      if (distToEnd <= 20) { // 🔒 20m = destination reached
           speak("Destination reached.", "step", { interrupt: true });
           UI.aiBox.textContent = "Destination reached ✅";
-
-          cleanupRoute(route);
+          const finishedIndex = activeRouteIndex;
+          // Remove this route cleanly
+          cleanupRoute(r);
+          // 👉 AUTO-ACTIVATE NEXT ROUTE (if it exists)
+          if (routes.length > 0) {
+              // shift route indexes so UI stays correct
+              routes.forEach((rr, i) => rr.routeIndex = i);
+              // Activate new first route
+              activeRouteIndex = 0;
+              currentStepIndex = 0;
+              announcedSteps.clear();
+              speak("Continuing to next destination.", "step", { interrupt: true });
+              // Force recenter + rotate
+              setTimeout(() => {
+                  forceRecenterToCar(18);
+                  rotateTowardRoute();
+              }, 400);
+          } 
+          else {
+              // No more routes
+              activeRouteIndex = null;
+              currentStepIndex = 0;
+          }
           return;
       }
   }
-
 
   // 2️⃣ Handle Normal Step Progression
   const locationResult = findCurrentStepByLocation(latlng, route);
@@ -1645,6 +1664,8 @@ function cleanupRoute(route) {
   const box = document.getElementById(`route-box-${route.routeIndex}`);
   if (box) box.remove();
   routes.splice(activeRouteIndex, 1);
+  // reset indexes so UI stays consistent
+  routes.forEach((r, i) => r.routeIndex = i);
   activeRouteIndex = null;
   currentStepIndex = 0;
   announcedSteps.clear();
@@ -1819,7 +1840,7 @@ async function adaptiveAIDashboard(latlng, heading) {
         const offDist = getNearestRouteDistance(latlng, route);
         const isMoving = currentSpeed > 15; 
         // Reroute Condition
-        if (offDist > 25 && isMoving && !route._isRerouting) {
+        if (offDist > 15 && isMoving && !route._isRerouting) {
             const now = Date.now();
             
             // ✅ Prevent spam rerouting

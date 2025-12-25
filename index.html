@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>5-reroute-pathbearing</title>
+<title>6-reroute-pathbearing</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -767,7 +767,7 @@ const MAX_REQUESTS = 6;     // safe limit
 const REQUEST_DELAY = 120;  // ms delay between API queues
 // Add cooldown tracking for reroute
 let lastRerouteTime = 0;
-const REROUTE_COOLDOWN = 10000; // 15 seconds
+const REROUTE_COOLDOWN = 15000; // 15 seconds
 const requestQueue = [];
 let isProcessingQueue = false;
 let __searchSeq = 0;   // 🔒 hard cancel token
@@ -838,7 +838,7 @@ const SPEECH = {
   ECO_PERIODIC: 35000,
   STEP_REMINDER: 20000,
   WARNING_HOLD: 3500,
-  LOOKAHEAD_DISTANCE: 100, // 🆕 Reduced from 300m - announce when 150m away
+  LOOKAHEAD_DISTANCE: 150, // 🆕 Reduced from 300m - announce when 150m away
   STEP_ARRIVAL_THRESHOLD: 30, // 🆕 Consider "arrived" when within 30m
 
   lastEcoText: "",
@@ -1245,24 +1245,12 @@ if (navigator.geolocation){
       heading = lastHeading || 0;
     }
     lastHeading = heading;
-    if (!userMarker) {
-        userMarker = L.marker(latlng, {
-            icon: carIcon,
-            interactive: false
-        }).addTo(map);
+    if(!userMarker){
+      userMarker = L.marker(latlng,{icon:carIcon}).addTo(map);
+      map.setView(latlng, 19);
+    } else {
+      userMarker.setLatLng(latlng);
     }
-
-    // 🔥 HARD-LOCK: car stays fixed in center
-    userMarker.setLatLng(latlng);
-    if (autoRotation && activeRouteIndex !== null) {
-        rotateTowardRoute();
-    }
-
-    map.setView(
-        latlng,
-        map.getZoom(),
-        { animate: true, duration: 0.25 }
-    );
     // 🔥 TRIGGER ROTATION UPDATE HERE
     if (autoRotation && activeRouteIndex !== null) {
         rotateTowardRoute();
@@ -1284,42 +1272,41 @@ if (navigator.geolocation){
 }
 
 // ==========================================
-// 🚀 FIXED: CALCULATE BEARING FOR "HEADS UP" DISPLAY
+// 🚀 NEW: CALCULATE BEARING 10m AHEAD ON PATH
 // ==========================================
 function getPathBearing(latlng, route) {
     if (!route || !route.coordinates || route.coordinates.length < 2) return 0;
 
     const coords = route.coordinates;
-    
-    // 1. Find the closest point on the route line to the car
-    let minDistance = Infinity;
+    let closestDist = Infinity;
     let closestIdx = route.lastClosestIndex || 0;
-    
-    // Optimization: Search window around last known position
-    const searchStart = Math.max(0, closestIdx - 5);
-    const searchEnd = Math.min(coords.length, closestIdx + 50);
 
-    for (let i = searchStart; i < searchEnd; i++) {
+    // optimization: only search forward from last known spot
+    // limit search window to next 50 points to save CPU
+    const searchLimit = Math.min(closestIdx + 50, coords.length);
+    
+    for (let i = closestIdx; i < searchLimit; i++) {
         const d = map.distance(latlng, coords[i]);
-        if (d < minDistance) {
-            minDistance = d;
+        if (d < closestDist) {
+            closestDist = d;
             closestIdx = i;
         }
     }
+    
+    // Save index for next frame
     route.lastClosestIndex = closestIdx;
 
-    // 2. Look Ahead Logic (Smooths out curves)
-    // We want the angle from [Current Pos] -> [Point 20 meters ahead]
+    // Look ahead ~15 meters (approx 2-3 coordinate points usually)
+    // We accumulate distance to be precise
     let lookAheadIdx = closestIdx;
     let distAccum = 0;
     
-    // Increased lookahead to 20m for smoother rotation
-    while (lookAheadIdx < coords.length - 1 && distAccum < 20) {
+    while (lookAheadIdx < coords.length - 1 && distAccum < 15) {
         distAccum += map.distance(coords[lookAheadIdx], coords[lookAheadIdx + 1]);
         lookAheadIdx++;
     }
 
-    // Safety: If at end of route, use last segment
+    // If we are at the very end, just use the last segment angle
     if (lookAheadIdx === closestIdx && closestIdx < coords.length - 1) {
         lookAheadIdx = closestIdx + 1;
     }
@@ -1327,11 +1314,8 @@ function getPathBearing(latlng, route) {
     const p1 = coords[closestIdx];
     const p2 = coords[lookAheadIdx];
 
-    // 3. Calculate Bearing
-    // This returns the angle needed to make the line vertical
+    // Calculate Bearing
     const angle = Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI;
-    
-    // Return standard 0-360 bearing
     return (angle + 360) % 360;
 }
 // ===============================
@@ -1340,21 +1324,36 @@ function getPathBearing(latlng, route) {
 function rotateTowardRoute() {
     if (!autoRotation) return;
     if (!routes.length || activeRouteIndex === null) return;
-
-    const route = routes[activeRouteIndex];
-    if (!route.coordinates || route.coordinates.length < 2) return;
-
+    // 1. Get the target angle based on the path 10-15m ahead
     const userLoc = userMarker ? userMarker.getLatLng() : map.getCenter();
-    const bearing = getPathBearing(userLoc, route);
+    const targetBearing = getPathBearing(userLoc, routes[activeRouteIndex]);
+    const route = routes[activeRouteIndex];
+    if (!route.steps || route.steps.length < 2) return;
 
-    // 🔥 Make path ALWAYS point straight UP (like Google Maps)
-    map.setBearing(bearing, {
+    let p1, p2;
+
+    // current step → next step
+    if (route.steps[currentStepIndex + 1]) {
+        p1 = route.steps[currentStepIndex];
+        p2 = route.steps[currentStepIndex + 1];
+    }
+    // fallback for last step
+    else if (currentStepIndex > 0) {
+        p1 = route.steps[currentStepIndex - 1];
+        p2 = route.steps[currentStepIndex];
+    } else {
+        return;
+    }
+
+    const angle =
+        Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI;
+
+    map.setBearing(targetBearing,(angle + 360) % 360, {
         animate: true,
-        duration: 0.35,
-        easeLinearity: 0.15
+        duration: 0.5, // Quick, smooth updates
+        easeLinearity: 0.2
     });
 }
-
 const compassBtn = document.getElementById("compass-btn");
 compassBtn.onclick = () => {
     compassMode = (compassMode + 1) % 2;
@@ -1534,89 +1533,61 @@ function findCurrentStepByLocation(latlng, route) {
   return closestStepIndex >= 0 ? { index: closestStepIndex, distance: closestDistance } : null;
 }
 
-// ==========================================
-// 🚀 FIXED: STEP ADVANCEMENT & DESTINATION ARRIVAL
-// ==========================================
+// 🆕 SMART STEP ADVANCEMENT
+// Handles skipping missed steps and announcing current location
 function smartStepAdvancement(latlng) {
   if (activeRouteIndex === null || !routes[activeRouteIndex]) return;
   const route = routes[activeRouteIndex];
   const steps = route.steps;
-  
-  // 🏁 FINAL DESTINATION CHECK (MULTI-ROUTE SAFE)
-  if (activeRouteIndex !== null && routes[activeRouteIndex]) {
-
-      const r = routes[activeRouteIndex];
-      if (!r.steps || r.steps.length === 0) return;
-      const finalStep = r.steps[r.steps.length - 1];
-      const destLL = L.latLng(finalStep.lat, finalStep.lng);
-      const dist = latlng.distanceTo(destLL);
-      // Within 28m = destination reached
-      if (dist <= 28) {
-
-          speak("Destination reached.", "step", { interrupt: true });
-          UI.aiBox.textContent = "Destination reached ✅";
-          const finishedIndex = activeRouteIndex;
-          // Remove this route cleanly
-          cleanupRoute(r);
-          // 👉 AUTO-ACTIVATE NEXT ROUTE (if it exists)
-          if (routes.length > 0) {
-              // shift route indexes so UI stays correct
-              routes.forEach((rr, i) => rr.routeIndex = i);
-              // Activate new first route
-              activeRouteIndex = 0;
-              currentStepIndex = 0;
-              announcedSteps.clear();
-              speak("Continuing to next destination.", "step", { interrupt: true });
-              // Force recenter + rotate
-              setTimeout(() => {
-                  forceRecenterToCar(18);
-                  rotateTowardRoute();
-              }, 400);
-          } 
-          else {
-              // No more routes
-              activeRouteIndex = null;
-              currentStepIndex = 0;
-          }
-          return;
-      }
-  }
-
-  // 2️⃣ Handle Normal Step Progression
+  // Find where driver actually is
   const locationResult = findCurrentStepByLocation(latlng, route);
-  
   if (locationResult && locationResult.index !== currentStepIndex) {
+    // Driver has moved to a different step!
     const newStepIndex = locationResult.index;
-    
-    // Mark previous steps completed
+    console.log(`🚗 Location jump detected: ${currentStepIndex} → ${newStepIndex}`);  
+    // Mark all skipped steps as completed (hide them)
     for (let i = currentStepIndex; i < newStepIndex; i++) {
         updateStepUI(activeRouteIndex, i, 'completed');
+        // 🔥 Smoothly erase completed step line instead of hard removal
         if (steps[i].lineLayer) {
             fadeOutStepLine(steps[i].lineLayer);
-            steps[i].lineLayer = null;
+            steps[i].lineLayer = null; // prevent double removal
         }     
+        if (steps[i].arrowLayer) {
+            try { steps[i].arrowLayer.remove(); } catch {}
+            steps[i].arrowLayer = null;
+        }
+
         if (steps[i].connectorLine) {
             fadeOutStepLine(steps[i].connectorLine, 400);
             steps[i].connectorLine = null;
         }
     }   
-    
+    // Update current step
     currentStepIndex = newStepIndex;
-    announcedSteps.clear(); 
+    announcedSteps.clear(); // Reset announcements 
     // 🔥 FORCE PATH TO FACE UP ON STEP CHANGE
     if (autoRotation) {
         ROUTE_CONTROLS_ROTATION = true;   // 🔒 force route authority
         map.stop();                      // 🧹 clear inertial bearing
     }
-    // Don't re-announce if it's the last step (handled by destination check above)
-    if (currentStepIndex >= steps.length - 1) return;
 
+    // If this is the last step (destination)
+    if (currentStepIndex >= steps.length - 1) {
+      updateStepUI(activeRouteIndex, currentStepIndex, 'completed');
+      speak("Destination reached.", "step", { interrupt: true });
+      UI.aiBox.textContent = "Destination reached ✅";    
+      setTimeout(() => {
+        cleanupRoute(route);
+      }, 3000);
+      return;
+    } 
+    // Mark current step as active and announce it
     updateStepUI(activeRouteIndex, currentStepIndex, 'active');
     const step = steps[currentStepIndex];
     const distText = step.distance < 1000 
       ? `${step.distance.toFixed(0)} meters` 
       : `${(step.distance / 1000).toFixed(1)} kilometers`;
-      
     const announcement = `${step.text}. Proceed for ${distText}.`;
     speak(announcement, "step", { interrupt: true });
     announcedSteps.add(currentStepIndex);
@@ -1664,8 +1635,6 @@ function cleanupRoute(route) {
   const box = document.getElementById(`route-box-${route.routeIndex}`);
   if (box) box.remove();
   routes.splice(activeRouteIndex, 1);
-  // reset indexes so UI stays consistent
-  routes.forEach((r, i) => r.routeIndex = i);
   activeRouteIndex = null;
   currentStepIndex = 0;
   announcedSteps.clear();
@@ -1840,7 +1809,7 @@ async function adaptiveAIDashboard(latlng, heading) {
         const offDist = getNearestRouteDistance(latlng, route);
         const isMoving = currentSpeed > 15; 
         // Reroute Condition
-        if (offDist > 15 && isMoving && !route._isRerouting) {
+        if (offDist > 25 && isMoving && !route._isRerouting) {
             const now = Date.now();
             
             // ✅ Prevent spam rerouting
@@ -1888,7 +1857,7 @@ async function adaptiveAIDashboard(latlng, heading) {
 }
 // --- Smooth animation for car movement (Google/Waze style) ---
 let lastAnimateTime = 0;
-const animationDuration = 300; // milliseconds
+const animationDuration = 450; // milliseconds
 let animateStart = null;
 let startLatLng = null;
 let targetLatLng = null;

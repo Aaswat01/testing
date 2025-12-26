@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>8-reroute-pathbearing</title>
+<title>new-reroute-test</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -1247,10 +1247,14 @@ if (navigator.geolocation){
     lastHeading = heading;
     if(!userMarker){
       userMarker = L.marker(latlng,{icon:carIcon}).addTo(map);
-      map.setView(latlng, 19);
     } else {
       userMarker.setLatLng(latlng);
     }
+    map.setView(
+      latlng,
+      map.getZoom(),
+      { animate: true, duration: 0.25 }
+    );
     // 🔥 TRIGGER ROTATION UPDATE HERE
     if (autoRotation && activeRouteIndex !== null) {
         rotateTowardRoute();
@@ -1527,87 +1531,69 @@ function smartStepAdvancement(latlng) {
   if (activeRouteIndex === null || !routes[activeRouteIndex]) return;
   const route = routes[activeRouteIndex];
   const steps = route.steps;
-  
-  // 🏁 FINAL DESTINATION CHECK (MULTI-ROUTE SAFE)
-  if (activeRouteIndex !== null && routes[activeRouteIndex]) {
 
-      const r = routes[activeRouteIndex];
-      if (!r.steps || r.steps.length === 0) return;
-      const finalStep = r.steps[r.steps.length - 1];
-      const destLL = L.latLng(finalStep.lat, finalStep.lng);
-      const dist = latlng.distanceTo(destLL);
-      // Within 28m = destination reached
-      if (dist <= 28) {
-
-          speak("Destination reached.", "step", { interrupt: true });
-          UI.aiBox.textContent = "Destination reached ✅";
-          const finishedIndex = activeRouteIndex;
-          // Remove this route cleanly
-          cleanupRoute(r);
-          // 👉 AUTO-ACTIVATE NEXT ROUTE (if it exists)
-          if (routes.length > 0) {
-              // shift route indexes so UI stays correct
-              routes.forEach((rr, i) => rr.routeIndex = i);
-              // Activate new first route
-              activeRouteIndex = 0;
-              currentStepIndex = 0;
-              announcedSteps.clear();
-              speak("Continuing to next destination.", "step", { interrupt: true });
-              // Force recenter + rotate
-              setTimeout(() => {
-                  forceRecenterToCar(18);
-                  rotateTowardRoute();
-              }, 400);
-          } 
-          else {
-              // No more routes
-              activeRouteIndex = null;
-              currentStepIndex = 0;
-          }
-          return;
-      }
-  }
-
-  // 2️⃣ Handle Normal Step Progression
+  // Find where driver actually is
   const locationResult = findCurrentStepByLocation(latlng, route);
-  
+
   if (locationResult && locationResult.index !== currentStepIndex) {
+    // Driver has moved to a different step!
     const newStepIndex = locationResult.index;
-    
-    // Mark previous steps completed
+    console.log(`🚗 Location jump detected: ${currentStepIndex} → ${newStepIndex}`);  
+
+    // Mark all skipped steps as completed (hide them)
     for (let i = currentStepIndex; i < newStepIndex; i++) {
         updateStepUI(activeRouteIndex, i, 'completed');
+
+        // 🔥 Smoothly erase completed step line instead of hard removal
         if (steps[i].lineLayer) {
             fadeOutStepLine(steps[i].lineLayer);
-            steps[i].lineLayer = null;
+            steps[i].lineLayer = null; 
         }     
+
         if (steps[i].connectorLine) {
             fadeOutStepLine(steps[i].connectorLine, 400);
             steps[i].connectorLine = null;
         }
     }   
-    
+
+    // Update current step
     currentStepIndex = newStepIndex;
     announcedSteps.clear(); 
+
     // 🔥 FORCE PATH TO FACE UP ON STEP CHANGE
     if (autoRotation) {
-        ROUTE_CONTROLS_ROTATION = true;   // 🔒 force route authority
-        map.stop();                      // 🧹 clear inertial bearing
+        requestAnimationFrame(() => rotateTowardRoute());
     }
-    // Don't re-announce if it's the last step (handled by destination check above)
-    if (currentStepIndex >= steps.length - 1) return;
 
+    // If this is the last step (destination)
+    if (currentStepIndex >= steps.length - 1) {
+      updateStepUI(activeRouteIndex, currentStepIndex, 'completed');
+      speak("Destination reached.", "step", { interrupt: true });
+      UI.aiBox.textContent = "Destination reached ✅";    
+
+      setTimeout(() => {
+        cleanupRoute(route);
+      }, 3000);
+
+      return;
+    } 
+
+    // Mark current step as active and announce it
     updateStepUI(activeRouteIndex, currentStepIndex, 'active');
+
     const step = steps[currentStepIndex];
-    const distText = step.distance < 1000 
-      ? `${step.distance.toFixed(0)} meters` 
-      : `${(step.distance / 1000).toFixed(1)} kilometers`;
-      
+    const distText =
+      step.distance < 1000
+        ? `${step.distance.toFixed(0)} meters`
+        : `${(step.distance / 1000).toFixed(1)} kilometers`;
+
     const announcement = `${step.text}. Proceed for ${distText}.`;
+
     speak(announcement, "step", { interrupt: true });
     announcedSteps.add(currentStepIndex);
   }
 }
+
 
 // 🆕 Check for upcoming step announcements
 function checkUpcomingSteps(latlng) {
@@ -1786,9 +1772,11 @@ function distanceToSegment(p, a, b) {
 // ======================================================
 async function triggerReroute(route, currentLL) {
 
-    // must have a valid route
-    if (!route || !route.steps || !route.steps.length) return;
+    // 🚦 STOP: reroute already happening
+    if (route._rerouting) return;
+    route._rerouting = true;
 
+    lastRerouteTime = Date.now();
     // destination = last step of route
     const lastStep = route.steps[route.steps.length - 1];
     const destLL = L.latLng(lastStep.lat, lastStep.lng);
@@ -1809,12 +1797,17 @@ async function triggerReroute(route, currentLL) {
         null,
         routeIndex
     );
+    activeRouteIndex = route.routeIndex;
+    currentStepIndex = 0;
+    announcedSteps.clear();
 
     speak("Route updated.", "step", { interrupt: true });
 
     // recenter + rotate
     forceRecenterToCar(18);
     requestAnimationFrame(() => rotateTowardRoute());
+    // unlock after rebuild
+    setTimeout(() => route._rerouting = false, 4000);
 }
 
 
@@ -1845,9 +1838,8 @@ async function adaptiveAIDashboard(latlng, heading) {
         const route = routes[activeRouteIndex];
         /*** 🚨 AUTO REROUTE ENGINE FIX 🚨 ***/
         const offDist = getNearestRouteDistance(latlng, route);
-        const isMoving = currentSpeed > 15; 
         // Reroute Condition
-        if (offDist > 20 && isMoving) {
+        if (offDist > 30) {
             const now = Date.now();
             if (now - lastRerouteTime < REROUTE_COOLDOWN) return;
             lastRerouteTime = now;

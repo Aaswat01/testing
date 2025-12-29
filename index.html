@@ -1603,13 +1603,26 @@ function cleanupRoute(route) {
   try { map.removeControl(route.rc); } catch {}
   try { map.removeLayer(route.group); } catch {}
 
-  // remove destination marker
-  const destIndex = waypointMarkers.length - 1;
-  if (waypointMarkers[destIndex]) {
-      map.removeLayer(waypointMarkers[destIndex]);
-      waypointMarkers.splice(destIndex, 1);
-      waypoints.splice(destIndex + 1, 1);
+  // remove ONLY the waypoint that belongs to THIS route
+  const lastStep = route.steps[route.steps.length - 1];
+  const destLL = L.latLng(lastStep.lat, lastStep.lng);
+  
+  let removeIndex = -1;
+  
+  for (let i = 0; i < waypointMarkers.length; i++) {
+      const ll = waypointMarkers[i].getLatLng();
+      if (ll.lat === destLL.lat && ll.lng === destLL.lng) {
+          removeIndex = i;
+          break;
+      }
   }
+  
+  if (removeIndex !== -1) {
+      try { map.removeLayer(waypointMarkers[removeIndex]); } catch {}
+      waypointMarkers.splice(removeIndex, 1);
+      waypoints.splice(removeIndex + 1, 1);
+  }
+
 
   // remove UI box
   const box = document.getElementById(`route-box-${route.routeIndex}`);

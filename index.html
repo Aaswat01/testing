@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>test2</title>
+<title>test3</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -1844,10 +1844,11 @@ async function adaptiveAIDashboard(latlng, heading) {
         /*** 🚨 AUTO REROUTE ENGINE FIX 🚨 ***/
         const offDist = getNearestRouteDistance(latlng, route);
         // Reroute Condition
-        if (offDist > 30) {
+        if (!route.completed && offDist > 30) {
             const now = Date.now();
             if (now - lastRerouteTime < REROUTE_COOLDOWN) return;
             lastRerouteTime = now;
+
             console.warn(`👉 Off-route detected (${offDist.toFixed(1)}m) – rebuilding route...`);
             triggerReroute(route, latlng);
         }

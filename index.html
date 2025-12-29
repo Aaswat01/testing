@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>test1</title>
+<title>test2</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -1556,6 +1556,7 @@ function smartStepAdvancement(latlng) {
       updateStepUI(activeRouteIndex, currentStepIndex, 'completed');
       speak("Destination reached.", "step", { interrupt: true });
       UI.aiBox.textContent = "Destination reached ✅";    
+      route.completed = true;
       setTimeout(() => {
         cleanupRoute(route);
       }, 3000);
@@ -1597,26 +1598,56 @@ function checkUpcomingSteps(latlng) {
 }
 
 function cleanupRoute(route) {
+
+  // remove visuals
   try { map.removeControl(route.rc); } catch {}
   try { map.removeLayer(route.group); } catch {}
+
+  // remove destination marker
   const destIndex = waypointMarkers.length - 1;
   if (waypointMarkers[destIndex]) {
-    map.removeLayer(waypointMarkers[destIndex]);
-    waypointMarkers.splice(destIndex, 1);
-    waypoints.splice(destIndex + 1, 1);
+      map.removeLayer(waypointMarkers[destIndex]);
+      waypointMarkers.splice(destIndex, 1);
+      waypoints.splice(destIndex + 1, 1);
   }
+
+  // remove UI box
   const box = document.getElementById(`route-box-${route.routeIndex}`);
   if (box) box.remove();
-  routes.splice(activeRouteIndex, 1);
+
+  // remove the finished route from list
+  routes.splice(route.routeIndex, 1);
+
+  // 🟢 DO NOT force index 0
   activeRouteIndex = null;
+
+  // 🟢 DO NOT RESET steps globally
   currentStepIndex = 0;
+
   announcedSteps.clear();
   SPEECH.lastStepText = "";
   SPEECH.lastStepSpokenAt = 0;
   SPEECH.currentDisplay.kind = "eco";
+
+  // 🟢 🔥 RE-NORMALIZE routeIndex FOR ALL ROUTES
+  routes.forEach((r, i) => {
+      r.routeIndex = i;
+
+      // fix associated route box id if still on screen
+      const b = document.getElementById(`route-box-${i}`);
+      if (b) b.id = `route-box-${i}`;
+  });
+
   rebuildRoutes();
   refreshAIBox();
+
+  // 🟢 If routes remain → automatically go to next one
+  if (routes.length > 0) {
+      activeRouteIndex = 0;
+      currentStepIndex = 0;
+  }
 }
+
 // 🆕 REPEAT CURRENT STEP INSTRUCTION (like eco tips)
 // Prevents silent period during long steps
 function maybeRepeatCurrentStep() {
@@ -1746,7 +1777,7 @@ function distanceToSegment(p, a, b) {
 // SIMPLE REROUTE — rebuild route from scratch
 // ======================================================
 async function triggerReroute(route, currentLL) {
-
+    if (route.completed) return;   // <<< STOP resurrecting finished route
     // 🚦 STOP: reroute already happening
     if (route._rerouting) return;
     route._rerouting = true;
@@ -1775,7 +1806,7 @@ async function triggerReroute(route, currentLL) {
     activeRouteIndex = route.routeIndex;
     currentStepIndex = Math.max(0, currentStepIndex - 1); 
     announcedSteps.clear();
-
+    SPEECH.lastStepText = "";
     speak("Route updated.", "step", { interrupt: true });
 
     // recenter + rotate
@@ -3038,3 +3069,4 @@ micBtn.onclick = async () => {
 </script>
 </body>
 </html>
+

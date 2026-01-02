@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>test6</title>
+<title>test7</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"/>
 <style>
@@ -695,10 +695,15 @@ const nightMap = L.tileLayer(
   }
 );
 
-const englishMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  attribution: '&copy; OpenStreetMap contributors | © CartoDB',
-  subdomains: 'abcd', maxZoom: 19
+// Source - https://stackoverflow.com/a
+// Posted by zagistechno, modified by community. See post 'Timeline' for change history
+// Retrieved 2026-01-03, License - CC BY-SA 4.0
+
+const englishMap =  L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{
+        maxZoom: 20,
+        subdomains:['mt0','mt1','mt2','mt3']
 });
+
 const googleMap = L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
   maxZoom: 23, subdomains: ['mt0','mt1','mt2','mt3']
 });
@@ -710,7 +715,7 @@ L.control.layers(
   { 
     "🌍 Google Map": googleMap,
     "🗺️ OSM Map": osmMap,
-    "🗺️ Light Map": englishMap,
+    "🗺️ Satellite": englishMap,
     "🌙 Night Mode": nightMap   // <<< added
   },
   null,
@@ -981,7 +986,7 @@ function buildPreviewRoute(startLL, endLL, labelText){
         color:'#4DA6FF', 
         weight:5, 
         opacity:0.9 
-    }).addTo(preview.group);
+    }).addTo(preview.group)
     
     // Update labels with actual numbers once loaded
     approvalDistance.textContent = fmtKm(r.summary.totalDistance);
@@ -1184,24 +1189,32 @@ map.on("movestart", (e) => {
 });
 
 // ============================================
-// 🚗 AUTO RECENTER CAR AFTER IDLE
+// 🚗 AUTO RECENTER & ROTATE AFTER IDLE
 // ============================================
 setInterval(() => {
     if (!userMarker) return;
 
     const idleTime = Date.now() - lastDashboardInteraction;
 
-    // Still interacting → do nothing
+    // 1. If user is still interacting, do nothing
     if (idleTime < IDLE_RECENTER_DELAY) return;
 
-    // Already centered → skip
-    if (follow && autoCenter && !userHasTouchedMap) return;
+    // 2. If everything is already perfect (Centered AND Rotating correctly), skip
+    // We check !autoRotation here to see if we need to restore it
+    if (follow && autoCenter && !userHasTouchedMap && (activeRouteIndex === null || autoRotation)) return;
 
-    // 🔥 FORCE RECENTER
+    // 3. 🔥 FORCE RESTORE STATE
     follow = true;
     autoCenter = true;
     userHasTouchedMap = false;
 
+    // If we have a route, re-enable auto-rotation and snap view
+    if (activeRouteIndex !== null) {
+        autoRotation = true; 
+        requestAnimationFrame(() => rotateTowardRoute());
+    }
+
+    // Smoothly fly back to car
     map.flyTo(
         userMarker.getLatLng(),
         map.getZoom(),
@@ -1559,8 +1572,12 @@ function smartStepAdvancement(latlng) {
         const distText = step.distance < 1000 
           ? `${step.distance.toFixed(0)} meters` 
           : `${(step.distance / 1000).toFixed(1)} kilometers`;
-        
-        speak(`${step.text}. Proceed for ${distText}.`, "step", { interrupt: true });
+          const spoken =
+            step.translatedName
+              ? `${step.text} on ${step.translatedName}. Proceed for ${distText}.`
+              : `${step.text}. Proceed for ${distText}.`;
+
+          speak(spoken, "step", { interrupt: true });
         announcedSteps.add(currentStepIndex);
     }
 
@@ -2019,6 +2036,27 @@ async function getEnglishName(lat, lon) {
   window._roadCache[key] = "Unnamed Road";
   return "Unnamed Road";
 }
+async function addTranslatedNameToStep(step) {
+    try {
+        const name = await getEnglishName(step.lat, step.lng);
+
+        if (!name || name === "Unnamed Road") return;
+
+        // Show inside UI
+        if (step.element) {
+            const label = step.element.querySelector("b");
+            if (label && !label.innerHTML.includes(name)) {
+                label.innerHTML = `${step.text}<br><span style="opacity:.8;font-size:.8rem;">${name}</span>`;
+            }
+        }
+
+        // Save for voice usage
+        step.translatedName = name;
+
+    } catch (err) {
+        console.warn("Translation failed", err);
+    }
+}
 
 // ===============================
 // POLYLINE DECORATOR ARROWS (IMPROVED)
@@ -2068,11 +2106,18 @@ async function createRoute(start, end, color, marker = null, index = null) {
   }
 
   const rc = L.Routing.control({
-    waypoints: [start, end],
-    router: OSRM_ROUTER,
-    show: false, addWaypoints: false, createMarker: () => null,
-    lineOptions: { styles: [{ color: routeColor, weight: 6, opacity: 0.9 }] }
-  }).addTo(map);
+      waypoints: [start, end],
+      router: OSRM_ROUTER,
+      show: false, 
+      addWaypoints: false, 
+      createMarker: () => null,
+      // 👇 UPDATE THIS BLOCK
+      lineOptions: { 
+          styles: [], // <--- EMPTY ARRAY hides the default line
+          extendToWaypoints: false, 
+          missingRouteTolerance: 50 
+      } 
+    }).addTo(map);
 
   const group = L.layerGroup().addTo(map);
   
@@ -2127,13 +2172,13 @@ async function createRoute(start, end, color, marker = null, index = null) {
       if (idxStart >= coords.length) return;
       const validEnd = Math.min(idxEnd, coords.length - 1);
       const segmentCoords = coords.slice(idxStart, validEnd + 1);
+      const elev = elevs[idxStart] || 0;
 
       // Draw visual line for this step
       const stepLine = L.polyline(segmentCoords, {
         color: routeColor,
         weight: 6,
         opacity: 0.8,
-        pane: "routePane" // 🔥 Fixes z-index issues
       }).addTo(group);
       
       if(i === 0) addPolylineArrows(stepLine, group);
@@ -2141,24 +2186,70 @@ async function createRoute(start, end, color, marker = null, index = null) {
       const item = document.createElement("div");
       item.className = "route-step upcoming";
       item.id = `step-${routeIndex}-${i}`; // ID for removal logic
-      item.innerHTML = `<b>${s.text}</b><div>${(s.distance / 1000).toFixed(2)} km</div>`;
+      item.innerHTML = `<b>${s.text}</b><div>${(s.distance / 1000).toFixed(2)} km | Elev ${elev.toFixed(1)} m</div>`;
       content.appendChild(item);
 
       // Hover Effect
       item.addEventListener("mouseenter", () => {
-          stepLine.setStyle({ color: "#00FF00", weight: 9, opacity: 1 });
+          stepLine.setStyle({ color: "#00FF00", weight: 7, opacity: 1 });
       });
       item.addEventListener("mouseleave", () => {
-          stepLine.setStyle({ color: routeColor, weight: 6, opacity: 0.8 });
+          stepLine.setStyle({ color: routeColor, weight: 5, opacity: 0.8 });
       });
 
-      steps.push({
+      const stepObj = {
         lat: coords[idxStart].lat,
         lng: coords[idxStart].lng,
         text: s.text,
+        elev,
+        element: item,
         distance: s.distance,
-        element: item
-      });
+        lineLayer: stepLine,
+        translated: false
+      };
+      steps.push(stepObj);
+
+      // ======================================================
+      // 🌍 TRANSLATION LOGIC (Applies to ALL steps strictly)
+      // ======================================================
+      setTimeout(async () => {
+        if (stepObj.translated) return;
+
+        try {
+            // ✅ FIX: Calculate the MIDPOINT of the segment.
+            // Using the start/end gets you the intersection (wrong name).
+            // Using the middle gets you the actual road name.
+            const midIndex = Math.floor((idxStart + idxEnd) / 2);
+            const targetLat = coords[midIndex].lat;
+            const targetLng = coords[midIndex].lng;
+
+            let englishRoad = await getEnglishName(targetLat, targetLng);
+
+            if (englishRoad) {
+                englishRoad = englishRoad.split(",")[0].trim();
+
+                // Only update if the English name is NOT already in the instruction
+                if (!stepObj.text.toLowerCase().includes(englishRoad.toLowerCase())) {
+                    const newText = `${s.text} (${englishRoad})`;
+                    
+                    // Update UI
+                    item.querySelector("b").textContent = newText;
+                    stepObj.text = newText;
+                    stepObj.translated = true;
+
+                    // Update "Last Spoken" text if this is the active step right now
+                    if (activeRouteIndex === routeIndex && currentStepIndex === i) {
+                         SPEECH.lastStepText = newText;
+                         aiBoxShow("step", newText);
+                         // 🟢 NEW: Speak the corrected/translated step text
+                         speak(newText, "step", { interrupt: true });
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn(`Translation failed for step ${i}`, err);
+        }
+      }, i * 300); // Stagger requests (600ms) to prevent API ban
     });
 
     // Update Route Object
@@ -2176,15 +2267,25 @@ async function createRoute(start, end, color, marker = null, index = null) {
     if (existingIdx !== -1) routes[existingIdx] = routeObj;
     else routes.push(routeObj);
 
-    // Initial Start
+// Initial Start
     if (activeRouteIndex === null || activeRouteIndex === routeIndex) {
         activeRouteIndex = routeIndex;
         currentStepIndex = 0;
         announcedSteps.clear();
         updateStepUI(routeIndex, 0, 'active');
+        
+        // 🟢 UPDATE: Force immediate rotation when path is made
+        autoRotation = true;
+        follow = true;
+        autoCenter = true;
+        userHasTouchedMap = false; // Ensure map knows user isn't holding it
+        
+        // Force rotation instantly, then again after a slight delay to ensure lines are rendered
+        requestAnimationFrame(() => rotateTowardRoute());
+        setTimeout(() => rotateTowardRoute(), 1000);
+
         if(!GLOBAL_REROUTING) speak(`${steps[0].text}`, "step");
         
-        // Update distance text immediately
         const distEl = document.getElementById(`route-distance-${routeIndex}`);
         if(distEl) distEl.textContent = `${(r.summary.totalDistance/1000).toFixed(1)} km total`;
     }
